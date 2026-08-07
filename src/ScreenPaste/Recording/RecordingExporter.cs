@@ -102,7 +102,7 @@ public sealed class RecordingExporter
     }
 
     /// <summary>
-    /// Chain: [0:v] → per-region split/crop/blur/overlay → annotation PNG overlay →
+    /// Chain: [0:v] → annotation PNG overlay → per-region split/crop/blur/overlay →
     /// format-specific tail (palette for GIF, pixel format for MP4).
     /// </summary>
     private static string BuildFilterGraph(RecordingFormat format, bool hasOverlay,
@@ -111,6 +111,14 @@ public sealed class RecordingExporter
         var inv = CultureInfo.InvariantCulture;
         var chains = new List<string>();
         string cur = "[0:v]";
+
+        // Annotations are burnt in first so the blur regions, which are painted over
+        // everything in the editor, obscure the strokes and shapes under them too.
+        if (hasOverlay)
+        {
+            chains.Add($"{cur}[1:v]overlay=0:0[va]");
+            cur = "[va]";
+        }
 
         for (int i = 0; i < blurs.Count; i++)
         {
@@ -122,12 +130,6 @@ public sealed class RecordingExporter
             chains.Add($"[fg{i}]crop={r.Width}:{r.Height}:{r.X}:{r.Y},{effect}[bl{i}]");
             chains.Add($"[bg{i}][bl{i}]overlay=x={r.X}:y={r.Y}[v{i}]");
             cur = $"[v{i}]";
-        }
-
-        if (hasOverlay)
-        {
-            chains.Add($"{cur}[1:v]overlay=0:0[va]");
-            cur = "[va]";
         }
 
         if (FFmpegEncoder.FilterFragment(format) is { } frag)

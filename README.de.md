@@ -25,7 +25,7 @@ Nach der Aufnahme erscheint neben dem Cursor eine **Symbol-Werkzeugleiste** (ver
 - **Formen** — Rechteck / abgerundetes Rechteck / Ellipse, Umriss oder gefüllt, Linienstärke und Farbe einstellbar
 - **Linie / Pfeil** — zum Zeichnen ziehen; jedes Ende kann einzeln eine Pfeilspitze erhalten; Stärke und Farbe einstellbar; mit `Umschalt` an 45°-Winkeln einrasten
 - **Eingefügte Bilder** — PNG / JPEG / WebP einfügen, ziehen zum Verschieben, Mausrad zum Skalieren
-- **Weichzeichnen** — Gaußscher Weichzeichner / Mosaik, Stärke einstellbar
+- **Weichzeichnen** — Gaußscher Weichzeichner / Mosaik, Stärke einstellbar; liegt über allen Anmerkungen und verdeckt damit auch Striche und Formen darunter, und lässt sich frei verschieben (der Bereich tastet danach die neue Stelle ab)
 - **Direktes Auswählen / Verschieben** — fahren Sie über eine platzierte Anmerkung und **ziehen Sie sie direkt**; `Entf` löscht sie; Verschieben und Löschen sind rückgängig machbar
 - **Farbwähler** — Hex-Eingabe, RGB und Deckkraft (transluzente Farben werden über einem Schachbrett angezeigt); eigene Farben werden sitzungsübergreifend gespeichert, Rechtsklick auf ein Farbfeld entfernt es
 - **Rückgängig / Wiederholen** — per Schaltfläche und Tastenkürzel; jeder Schieberegler zeigt den aktuellen Wert an
@@ -36,7 +36,7 @@ Nach der Aufnahme erscheint neben dem Cursor eine **Symbol-Werkzeugleiste** (ver
 - **Am Bildschirm anheften**: Das Bild schwebt im Vordergrund; ziehen zum Verschieben, Mausrad zum Zoomen, Rechtsklick für das Menü; bei mehreren Pins schließt Esc zuerst den fokussierten, ohne Fokus alle
 
 ### Bereichsaufnahme
-- Ein eigener globaler Hotkey (standardmäßig **F2**): Bereich per Ziehen auswählen und aufnehmen, erneut drücken (oder Stopp klicken) zum Beenden
+- Ein eigener globaler Hotkey (standardmäßig **F2**): Bereich per Ziehen auswählen oder **ein Fenster anklicken zur automatischen Erkennung** (Rad wechselt Fenster-/Element-Ebenen, wie beim Screenshot), erneut drücken (oder Stopp klicken) zum Beenden
 - Während der Aufnahme markiert ein roter Rahmen den Bereich, dazu eine kleine Leiste mit Timer und Stopp-Schaltfläche
 - Nach der Aufnahme öffnet sich ein **Editor**: Schleifenvorschau, Trimm-Griffe auf der Zeitleiste (`Leertaste` Wiedergabe, `←`/`→` Einzelbild, `I`/`O` für Start-/Endpunkt), Export mit Fortschrittsbalken
 - **Ziehen Sie den Rand des roten Rahmens, um den Bereich während der Aufnahme zu verschieben** — das Innere bleibt voll bedienbar

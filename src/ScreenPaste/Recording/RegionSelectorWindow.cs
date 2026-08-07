@@ -5,6 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using ScreenPaste.Capture;
 using ScreenPaste.Native;
 using ScreenPaste.Settings;
 
@@ -23,10 +24,20 @@ public sealed class RegionSelectorWindow : Window
     private readonly Border _selBorder;
     private readonly Border _sizeReadout;
     private readonly TextBlock _sizeText;
+    private readonly Rectangle _detectBorder;
 
     private double _dpiScale = 1.0;
     private Point _dragStart;
     private bool _dragging;
+
+    // Window auto-detect (same as the screenshot overlay): snap to the window/element
+    // under the cursor, wheel walks outward, a plain click selects the highlighted rect.
+    private List<DetectedWindow> _windows = new();
+    private ElementDetector? _elements;
+    private int _detectLevel;             // 0 = deepest element … N = whole window
+    private int _detectCandidates = 1;    // chain length at the current hover point
+    private IntPtr _hoverWindow;
+    private Rect? _detectRect;            // in _root (physical px) coords, null when off-window
 
     /// <summary>Chosen region in physical screen coordinates; null if cancelled.</summary>
     public Int32Rect? Selection { get; private set; }
@@ -57,6 +68,17 @@ public sealed class RegionSelectorWindow : Window
         _mask.Fill = new SolidColorBrush(Color.FromArgb(0x73, 0x00, 0x00, 0x00));
         _mask.IsHitTestVisible = false;
         _root.Children.Add(_mask);
+
+        // Hovered-window auto-detect outline (dashed, matching the screenshot overlay).
+        _detectBorder = new Rectangle
+        {
+            Stroke = new SolidColorBrush(Color.FromRgb(0x3D, 0xA9, 0xFC)),
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 4, 2 },
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+        };
+        _root.Children.Add(_detectBorder);
 
         _selBorder = new Border
         {
@@ -103,7 +125,9 @@ public sealed class RegionSelectorWindow : Window
         _root.MouseLeftButtonDown += OnMouseDown;
         _root.MouseMove += OnMouseMove;
         _root.MouseLeftButtonUp += OnMouseUp;
+        MouseWheel += OnDetectWheel;
         KeyDown += OnKeyDown;
+        Closed += (_, _) => _elements?.Cancel();
         SourceInitialized += OnSourceInitialized;
         Loaded += (_, _) => { Activate(); Focus(); };
 
@@ -122,6 +146,12 @@ public sealed class RegionSelectorWindow : Window
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST,
             _vs.X, _vs.Y, _vs.Width, _vs.Height,
             NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+
+        // Snapshot windows for auto-detect (excluding our own overlay), then walk their
+        // UIA trees in the background so hovering can snap to individual UI elements.
+        _windows = WindowEnumerator.Enumerate(hwnd);
+        _elements = new ElementDetector();
+        _elements.StartScan(_windows);
     }
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
@@ -133,12 +163,19 @@ public sealed class RegionSelectorWindow : Window
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed) return;
         var p = e.GetPosition(_root);
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            UpdateDetect(p);   // idle hover: highlight the window/element under the cursor
+            return;
+        }
+
         if (!_dragging && (Math.Abs(p.X - _dragStart.X) > 3 || Math.Abs(p.Y - _dragStart.Y) > 3))
             _dragging = true;
         if (!_dragging) return;
 
+        _detectBorder.Visibility = Visibility.Collapsed;   // a manual drag overrides detect
         var r = MakeRect(_dragStart, p);
         Canvas.SetLeft(_selBorder, r.X);
         Canvas.SetTop(_selBorder, r.Y);
@@ -146,7 +183,75 @@ public sealed class RegionSelectorWindow : Window
         _selBorder.Height = r.Height;
         _selBorder.Visibility = Visibility.Visible;
         UpdateMask(r);
+        ShowSizeReadout(r);
+    }
 
+    /// <summary>
+    /// Hover auto-detect: snap to the deepest cached UI element under the cursor, falling
+    /// back to the whole window until its UIA scan lands. The wheel walks the level outward.
+    /// </summary>
+    private void UpdateDetect(Point p)
+    {
+        int sx = _vs.X + (int)Math.Round(p.X);
+        int sy = _vs.Y + (int)Math.Round(p.Y);
+
+        var win = WindowEnumerator.HitTestWindow(_windows, sx, sy);
+        if (win is { } w)
+        {
+            if (w.Handle != _hoverWindow)
+            {
+                _hoverWindow = w.Handle;
+                _detectLevel = 0;   // new window: restart at the deepest element
+            }
+
+            Rect chosen;
+            if (_elements != null)
+            {
+                var chain = _elements.CandidatesAt(w, sx, sy);
+                _detectCandidates = chain.Count;
+                chosen = chain[Math.Clamp(_detectLevel, 0, chain.Count - 1)];
+            }
+            else
+            {
+                _detectCandidates = 1;
+                chosen = new Rect(w.Bounds.Left, w.Bounds.Top, w.Bounds.Width, w.Bounds.Height);
+            }
+            _detectRect = new Rect(chosen.X - _vs.X, chosen.Y - _vs.Y, chosen.Width, chosen.Height);
+        }
+        else
+        {
+            _hoverWindow = IntPtr.Zero;
+            _detectCandidates = 1;
+            _detectRect = null;
+        }
+
+        if (_detectRect is { } dr)
+        {
+            Canvas.SetLeft(_detectBorder, dr.X);
+            Canvas.SetTop(_detectBorder, dr.Y);
+            _detectBorder.Width = dr.Width;
+            _detectBorder.Height = dr.Height;
+            _detectBorder.Visibility = Visibility.Visible;
+            ShowSizeReadout(dr);
+        }
+        else
+        {
+            _detectBorder.Visibility = Visibility.Collapsed;
+            _sizeReadout.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>Mouse wheel while hovering: cycle the detection level (element ⇄ window).</summary>
+    private void OnDetectWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (_dragging || _detectRect == null) return;
+        _detectLevel = Math.Clamp(_detectLevel + (e.Delta > 0 ? 1 : -1), 0, Math.Max(0, _detectCandidates - 1));
+        UpdateDetect(e.GetPosition(_root));
+        e.Handled = true;
+    }
+
+    private void ShowSizeReadout(Rect r)
+    {
         _sizeText.Text = $"{(int)r.Width} × {(int)r.Height}";
         double y = r.Y - 24;
         if (y < 2) y = r.Y + 4;
@@ -158,9 +263,15 @@ public sealed class RegionSelectorWindow : Window
     private void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
         _root.ReleaseMouseCapture();
-        if (!_dragging) return;
 
-        var r = MakeRect(_dragStart, e.GetPosition(_root));
+        Rect r;
+        if (_dragging)
+            r = MakeRect(_dragStart, e.GetPosition(_root));
+        else if (_detectRect is { } dr)
+            r = dr;                                // plain click on an auto-detected window
+        else
+            return;                                // click on empty space: nothing to select
+
         if (r.Width < 8 || r.Height < 8) return;   // ignore stray clicks
 
         Selection = new Int32Rect(

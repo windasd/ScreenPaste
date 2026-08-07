@@ -25,7 +25,7 @@ Après la capture, une **barre d'outils** apparaît près du curseur (déplaçab
 - **Formes** — rectangle / rectangle arrondi / ellipse, contour ou rempli, épaisseur et couleur réglables
 - **Ligne / flèche** — glissez pour tracer ; chaque extrémité peut devenir une pointe de flèche ; épaisseur et couleur réglables ; maintenez `Maj` pour aligner sur des angles de 45°
 - **Images collées** — collez des PNG / JPEG / WebP, glissez pour déplacer, molette pour redimensionner
-- **Flou** — flou gaussien / mosaïque, intensité réglable
+- **Flou** — flou gaussien / mosaïque, intensité réglable ; dessiné au-dessus de toutes les annotations, il masque donc les tracés et les formes en dessous, et se déplace par glisser (la zone ré-échantillonne ce qu'elle recouvre alors)
 - **Sélection / déplacement direct** — survolez n'importe quelle annotation posée et **déplacez-la directement** ; `Suppr` la supprime ; déplacements et suppressions sont annulables
 - **Sélecteur de couleurs** — saisie Hex, RGB et opacité (les couleurs translucides s'affichent sur un damier) ; les couleurs personnalisées sont mémorisées d'une session à l'autre, clic droit sur une pastille pour la retirer
 - **Annuler / Rétablir** — par boutons et raccourcis ; chaque curseur affiche sa valeur en temps réel
@@ -36,7 +36,7 @@ Après la capture, une **barre d'outils** apparaît près du curseur (déplaçab
 - **Épingler à l'écran** : l'image flotte au premier plan ; glissez-la, molette pour zoomer, clic droit pour le menu ; avec plusieurs épingles, Échap ferme d'abord celle qui a le focus, ou toutes s'il n'y en a aucune
 
 ### Enregistrement de zone
-- Un raccourci global dédié (**F2** par défaut) : glissez pour choisir la zone à enregistrer, appuyez à nouveau (ou cliquez sur Stop) pour terminer
+- Un raccourci global dédié (**F2** par défaut) : glissez pour choisir la zone à enregistrer, ou **cliquez sur une fenêtre pour la détecter automatiquement** (la molette parcourt les niveaux fenêtre/élément, comme pour la capture), appuyez à nouveau (ou cliquez sur Stop) pour terminer
 - Un cadre rouge marque la zone pendant l'enregistrement, avec une petite barre affichant le chrono et un bouton Stop
 - Après l'enregistrement, un **éditeur** s'ouvre : aperçu en boucle, poignées de découpe sur la timeline (`Espace` lecture, `←`/`→` image par image, `I`/`O` pour définir début/fin), export avec barre de progression
 - **Faites glisser le bord du cadre rouge pour déplacer la zone en cours d'enregistrement** — l'intérieur reste entièrement interactif

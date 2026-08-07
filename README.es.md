@@ -25,7 +25,7 @@ Tras capturar, aparece una **barra de herramientas** junto al cursor (arrastrabl
 - **Formas** — rectángulo / rectángulo redondeado / elipse, contorno o relleno, grosor y color ajustables
 - **Línea / flecha** — arrastra para dibujar; cada extremo puede convertirse en punta de flecha; grosor y color ajustables; mantén `Mayús` para ajustar a ángulos de 45°
 - **Imágenes pegadas** — pega PNG / JPEG / WebP, arrastra para mover, rueda para redimensionar
-- **Desenfoque** — desenfoque gaussiano / mosaico, intensidad ajustable
+- **Desenfoque** — desenfoque gaussiano / mosaico, intensidad ajustable; se dibuja por encima de todas las anotaciones, así que tapa los trazos y las formas que haya debajo, y se puede arrastrar a otro sitio (vuelve a muestrear lo que cubre ahora)
 - **Selección / movimiento directo** — pasa el ratón sobre cualquier anotación colocada y **arrástrala directamente**; `Supr` la elimina; mover y eliminar se pueden deshacer
 - **Selector de color** — entrada Hex, RGB y opacidad (los colores translúcidos se previsualizan sobre un damero); los colores personalizados se recuerdan entre sesiones, clic derecho en una muestra para quitarla
 - **Deshacer / Rehacer** — con botones y atajos; cada control deslizante muestra su valor en tiempo real
@@ -36,7 +36,7 @@ Tras capturar, aparece una **barra de herramientas** junto al cursor (arrastrabl
 - **Fijar en pantalla**: la imagen flota encima de todo; arrástrala, usa la rueda para hacer zoom, clic derecho para el menú; con varias fijadas, Esc cierra primero la enfocada, o todas si ninguna tiene el foco
 
 ### Grabación de zona
-- Un atajo global dedicado (**F2** por defecto): arrastra para elegir la zona a grabar, pulsa de nuevo (o haz clic en Detener) para terminar
+- Un atajo global dedicado (**F2** por defecto): arrastra para elegir la zona a grabar, o **haz clic en una ventana para detectarla automáticamente** (la rueda alterna niveles de ventana/elemento, igual que en la captura), pulsa de nuevo (o haz clic en Detener) para terminar
 - Un marco rojo marca la zona durante la grabación, con una pequeña barra con el cronómetro y un botón de detener
 - Al terminar se abre un **editor**: vista previa en bucle, tiradores de recorte en la línea de tiempo (`Espacio` reproducir, `←`/`→` fotograma a fotograma, `I`/`O` para fijar inicio/fin), exportación con barra de progreso
 - **Arrastra el borde del marco rojo para mover la zona durante la grabación** — el interior sigue siendo totalmente interactivo

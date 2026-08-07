@@ -205,6 +205,9 @@ public partial class CaptureOverlayWindow : Window
         Toolbar.MouseLeftButtonUp += Toolbar_DragEnd;
 
         _history.Changed += UpdateHistoryButtons;
+        // Every edit (and every undo/redo) funnels through the history, so this is the one
+        // place that has to re-sample the blur regions over the new content.
+        _history.Changed += InvalidateBlurs;
 
         UpdateMask(null);
     }
@@ -1235,23 +1238,42 @@ public partial class CaptureOverlayWindow : Window
         rel.Intersect(new Rect(0, 0, _selection.Width, _selection.Height));
         if (rel.Width < 6 || rel.Height < 6) return;
 
-        var abs = new Int32Rect(
-            _selection.X + (int)Math.Round(rel.X),
-            _selection.Y + (int)Math.Round(rel.Y),
-            (int)Math.Round(rel.Width),
-            (int)Math.Round(rel.Height));
-
-        FrameworkElement visual = _blurKind == BlurKind.Mosaic
-            ? BlurEffects.CreateMosaic(_screenshot, abs, _blurStrength)
-            : BlurEffects.CreateGaussian(_screenshot, abs, _blurStrength);
-
-        Canvas.SetLeft(visual, rel.X);
-        Canvas.SetTop(visual, rel.Y);
-        BlurHost.Children.Add(visual);
+        // Region-local coords: the region samples the composite beneath it, not the raw
+        // screenshot, so it stays valid wherever the user later drags it.
+        var visual = BlurEffects.Create(_blurKind, rel, _blurStrength);
+        BlurHost.Children.Add(visual);   // the history push below re-samples it
 
         _history.Push(
             undo: () => BlurHost.Children.Remove(visual),
             redo: () => { if (!BlurHost.Children.Contains(visual)) BlurHost.Children.Add(visual); });
+    }
+
+    // ------------------------------------------------------ blur sampling ---
+    // A blur region shows whatever currently sits under the blur layer, so it covers the
+    // annotations beneath it and can be moved freely. `_blurBeneath` caches that composite
+    // (base screenshot + shapes + stickers + ink + text) and is dropped whenever an edit
+    // lands; a drag only re-crops from the cache, which keeps it cheap per frame.
+
+    private BitmapSource? _blurBeneath;
+
+    private void InvalidateBlurs()
+    {
+        _blurBeneath = null;
+        RefreshBlurs();
+    }
+
+    private BitmapSource BlurBeneath() => _blurBeneath ??= Compositor.ComposeBeneathBlur(
+        _screenshot, _selection, Ink.Strokes, ShapeHost, StickerHost, TextHost);
+
+    /// <summary>Re-sample every blur region from the content beneath the blur layer.</summary>
+    private void RefreshBlurs()
+    {
+        if (_phase != Phase.Editing || BlurHost.Children.Count == 0) return;
+
+        var beneath = BlurBeneath();
+        foreach (var child in BlurHost.Children)
+            if (child is FrameworkElement el && el != _blurPreview)
+                BlurEffects.Resample(el, beneath);
     }
 
     // ------------------------------------------------------- shape tool ---
@@ -1542,6 +1564,7 @@ public partial class CaptureOverlayWindow : Window
         LayoutEditLayer(sel);
         LayoutHandles();
         PositionToolbar();
+        InvalidateBlurs();   // the region now covers different screenshot pixels
         if (_selected != null) UpdateSelectionBox();
     }
 
@@ -1563,12 +1586,12 @@ public partial class CaptureOverlayWindow : Window
     }
 
     // -------------------------------------------- direct manipulation ---
-    // Hover any annotation (shape / line / text / sticker) with ANY tool: the cursor
-    // becomes a move cursor and dragging grabs it; Delete removes the selection. The
-    // handlers tunnel (Preview*) on EditLayer, so they run before InkCanvas or the
+    // Hover any annotation (blur / shape / line / text / sticker) with ANY tool: the
+    // cursor becomes a move cursor and dragging grabs it; Delete removes the selection.
+    // The handlers tunnel (Preview*) on EditLayer, so they run before InkCanvas or the
     // InteractionLayer — drawing only starts on empty space. Hit testing is bounding-
-    // box based and moves use a TranslateTransform. Ink strokes and blur regions stay
-    // undo-only (moving a blur would silently change which pixels it samples).
+    // box based and moves use a TranslateTransform. A dragged blur re-samples from its
+    // new position each frame. Ink strokes stay undo-only.
 
     /// <summary>Clicking outside the active text box (and outside the toolbar, so style
     /// tweaks don't dismiss it) commits the text — same as pressing Enter.</summary>
@@ -1625,6 +1648,8 @@ public partial class CaptureOverlayWindow : Window
             var tt = EnsureTranslate(_selected);
             tt.X = _moveOrigX + (p.X - _moveGrab.X);
             tt.Y = _moveOrigY + (p.Y - _moveGrab.Y);
+            // A blur shows the pixels it currently sits over, so it has to follow the drag.
+            if (_selected.Parent == BlurHost) BlurEffects.Resample(_selected, BlurBeneath());
             UpdateSelectionBox();
             e.Handled = true;
             return;
@@ -1663,10 +1688,10 @@ public partial class CaptureOverlayWindow : Window
     }
 
     /// <summary>Topmost annotation whose bounds contain <paramref name="p"/> (host z-order:
-    /// text above stickers above shapes/lines, matching the composite).</summary>
+    /// blur above text above stickers above shapes/lines, matching the composite).</summary>
     private FrameworkElement? HitAnnotation(Point p)
     {
-        foreach (var host in new[] { TextHost, StickerHost, ShapeHost })
+        foreach (var host in new[] { BlurHost, TextHost, StickerHost, ShapeHost })
             for (int i = host.Children.Count - 1; i >= 0; i--)
                 if (host.Children[i] is FrameworkElement el && AnnotationBounds(el).Contains(p))
                     return el;
@@ -1959,6 +1984,7 @@ public partial class CaptureOverlayWindow : Window
     private BitmapSource Flatten()
     {
         CommitActiveText(discardIfEmpty: true);
+        InvalidateBlurs();   // make sure every region reflects the final annotation stack
         return Compositor.Compose(_screenshot, _selection, Ink.Strokes, BlurHost, ShapeHost, StickerHost, TextHost);
     }
 

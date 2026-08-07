@@ -25,7 +25,7 @@ After capturing, an **icon toolbar** pops up next to the cursor (draggable, and 
 - **Shapes** — rectangle / rounded rectangle / ellipse, outlined or filled, with adjustable line thickness and color
 - **Line / arrow** — drag to draw; each end can be toggled to an arrowhead; adjustable thickness and color; hold `Shift` to snap to 45° angles
 - **Stickers** — paste PNG / JPEG / WebP images, drag to move, scroll to resize
-- **Blur** — Gaussian blur / mosaic with adjustable strength
+- **Blur** — Gaussian blur / mosaic with adjustable strength; painted above every annotation, so a region hides the strokes and shapes under it, and it can be dragged to a new spot (it re-samples whatever it now covers)
 - **Direct select / move** — hover any placed annotation and **drag it right away**; `Delete` removes it; moves and deletes are undoable
 - **Color picker** — Hex input, RGB and opacity (translucent colors preview over a checkerboard); custom colors are remembered across sessions, right-click a swatch to remove it
 - **Undo / Redo** — via buttons and hotkeys; every slider shows a live numeric readout
@@ -36,7 +36,7 @@ After capturing, an **icon toolbar** pops up next to the cursor (draggable, and 
 - **Pin to screen**: the image floats on top; drag it, scroll to resize, right-click for a menu; with multiple pins, Esc closes the focused one first, or closes them all when none is focused
 
 ### Region recording
-- A dedicated global hotkey (**F2** by default): drag-select the region to record, press again (or click Stop) to finish
+- A dedicated global hotkey (**F2** by default): drag-select the region to record, or **click a window to auto-detect it** (wheel cycles window/element levels, just like capture), press again (or click Stop) to finish
 - A red frame marks the region while recording, with a small pill bar showing the timer and a Stop button
 - After recording, an **editor** opens: looping preview, timeline trim handles (`Space` to play, `←`/`→` frame stepping, `I`/`O` to set trim in/out), and export with a progress bar
 - **Drag the red frame's border to move the recording region mid-recording** — the interior stays fully interactive

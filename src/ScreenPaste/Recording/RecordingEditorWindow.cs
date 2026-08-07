@@ -12,6 +12,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using ScreenPaste.Editor;
 using ScreenPaste.Native;
+using ScreenPaste.Rendering;
 using ScreenPaste.Settings;
 using Forms = System.Windows.Forms;
 using Path = System.IO.Path;
@@ -61,12 +62,12 @@ public sealed class RecordingEditorWindow : Window
     // ---- annotations (authored in video-pixel space; static across the clip) ----
     private enum Tool { None, Text, Shape, Line, Blur, Mosaic, Sticker }
     private Tool _tool = Tool.None;
+    private readonly Grid _contentStack = new();  // video + annotations: what a blur samples
     private readonly Canvas _blurHost = new();   // blur previews (exported via ffmpeg filters)
     private readonly Canvas _annoHost = new();   // text/shapes/lines/stickers (exported as a PNG overlay)
     private readonly Canvas _interact = new();   // captures clicks/drags for the active tool
     private readonly EditHistory _history = new();
     private readonly List<Button> _toolButtons = new();
-    private readonly List<(Rectangle Visual, BlurRegion Region)> _blurs = new();
     private StackPanel _toolsPanel = null!;
     private Button _undoButton = null!, _redoButton = null!;
     private KeyGesture? _undoGesture, _redoGesture, _copyGesture;
@@ -195,10 +196,17 @@ public sealed class RecordingEditorWindow : Window
         _selectionLayer.Height = _videoH;
         _selectionLayer.IsHitTestVisible = false;
 
+        // The blur layer sits *above* the annotations and samples _contentStack, so a
+        // region hides the strokes and shapes under it and keeps doing so when dragged.
+        // _blurHost must stay outside _contentStack or the VisualBrush would recurse.
+        _contentStack.Width = _videoW;
+        _contentStack.Height = _videoH;
+        _contentStack.Children.Add(_player);
+        _contentStack.Children.Add(_annoHost);
+
         _pixelStack = new Grid { Width = _videoW, Height = _videoH };
-        _pixelStack.Children.Add(_player);
+        _pixelStack.Children.Add(_contentStack);
         _pixelStack.Children.Add(_blurHost);
-        _pixelStack.Children.Add(_annoHost);
         _pixelStack.Children.Add(_selectionLayer);
         _pixelStack.Children.Add(_interact);
         // Clicking the video outside the active text box commits it, like Enter
@@ -791,8 +799,10 @@ public sealed class RecordingEditorWindow : Window
     }
 
     /// <summary>
-    /// Register a blur region and show a live preview: the region of the playing video,
-    /// re-painted via VisualBrush with a BlurEffect. Export applies the real ffmpeg filter.
+    /// Register a blur region and show a live preview: the region of _contentStack (video
+    /// plus annotations), re-painted via VisualBrush with a BlurEffect. The region can be
+    /// dragged afterwards — <see cref="SyncBlurBrush"/> re-aims the Viewbox as it moves, and
+    /// the exported rect is read back off the visual. Export applies the real ffmpeg filter.
     /// </summary>
     private void AddBlur(Int32Rect r, bool mosaic)
     {
@@ -802,27 +812,50 @@ public sealed class RecordingEditorWindow : Window
             Width = r.Width,
             Height = r.Height,
             IsHitTestVisible = false,
-            Fill = new VisualBrush(_player)
+            Fill = new VisualBrush(_contentStack)
             {
                 Viewbox = new Rect(r.X, r.Y, r.Width, r.Height),
                 ViewboxUnits = BrushMappingMode.Absolute,
             },
             Effect = new BlurEffect { Radius = Math.Max(4, strength) },
+            Tag = new BlurSpec(mosaic ? BlurKind.Mosaic : BlurKind.Gaussian, strength),
         };
         Canvas.SetLeft(visual, r.X);
         Canvas.SetTop(visual, r.Y);
 
-        var entry = (Visual: visual, Region: new BlurRegion(r, mosaic, strength));
         _blurHost.Children.Add(visual);
-        _blurs.Add(entry);
         _history.Push(
-            undo: () => { _blurHost.Children.Remove(visual); _blurs.Remove(entry); },
-            redo: () =>
-            {
-                if (_blurHost.Children.Contains(visual)) return;
-                _blurHost.Children.Add(visual);
-                _blurs.Add(entry);
-            });
+            undo: () => _blurHost.Children.Remove(visual),
+            redo: () => { if (!_blurHost.Children.Contains(visual)) _blurHost.Children.Add(visual); });
+    }
+
+    /// <summary>Re-aim a moved region's VisualBrush at the pixels it now covers.</summary>
+    private static void SyncBlurBrush(FrameworkElement el)
+    {
+        if (el is Rectangle { Fill: VisualBrush brush } && el.Tag is BlurSpec)
+            brush.Viewbox = AnnotationBounds(el);
+    }
+
+    /// <summary>
+    /// The live blur regions in video-pixel coords, read off the visuals so drags and
+    /// undo/redo are both reflected. Regions are clamped to the frame — ffmpeg's crop
+    /// filter rejects anything that hangs outside it.
+    /// </summary>
+    private List<BlurRegion> CurrentBlurRegions()
+    {
+        var list = new List<BlurRegion>();
+        foreach (var child in _blurHost.Children)
+        {
+            if (child is not Rectangle rect || rect.Tag is not BlurSpec spec) continue;
+            var b = AnnotationBounds(rect);
+            b.Intersect(new Rect(0, 0, _videoW, _videoH));
+            if (b.IsEmpty || b.Width < 2 || b.Height < 2) continue;
+            list.Add(new BlurRegion(
+                new Int32Rect((int)Math.Round(b.X), (int)Math.Round(b.Y),
+                    (int)Math.Round(b.Width), (int)Math.Round(b.Height)),
+                spec.Kind == BlurKind.Mosaic, spec.Strength));
+        }
+        return list;
     }
 
     private void PlaceText(Point p)
@@ -961,9 +994,9 @@ public sealed class RecordingEditorWindow : Window
     }
 
     // -------------------------------------------- direct manipulation ---
-    // Hover any annotation (shape / line / text / sticker) with ANY tool: dragging
-    // grabs and moves it, Delete removes it, both undoable. Bounding-box hit testing
-    // over _annoHost; moves use a TranslateTransform. Blur regions stay undo-only.
+    // Hover any annotation (blur / shape / line / text / sticker) with ANY tool: dragging
+    // grabs and moves it, Delete removes it, both undoable. Bounding-box hit testing over
+    // _blurHost then _annoHost; moves use a TranslateTransform.
 
     private void Stack_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -996,6 +1029,7 @@ public sealed class RecordingEditorWindow : Window
             var tt = EnsureTranslate(_selected);
             tt.X = _moveOrigX + (p.X - _moveGrab.X);
             tt.Y = _moveOrigY + (p.Y - _moveGrab.Y);
+            SyncBlurBrush(_selected);   // no-op unless this is a blur region
             UpdateSelectionBox();
             e.Handled = true;
             return;
@@ -1018,8 +1052,8 @@ public sealed class RecordingEditorWindow : Window
         if (Math.Abs(nx - ox) < 0.5 && Math.Abs(ny - oy) < 0.5) return;   // click, not a move
 
         _history.Push(
-            undo: () => { var t = EnsureTranslate(el); t.X = ox; t.Y = oy; },
-            redo: () => { var t = EnsureTranslate(el); t.X = nx; t.Y = ny; });
+            undo: () => { var t = EnsureTranslate(el); t.X = ox; t.Y = oy; SyncBlurBrush(el); },
+            redo: () => { var t = EnsureTranslate(el); t.X = nx; t.Y = ny; SyncBlurBrush(el); });
     }
 
     private void DeleteSelected()
@@ -1032,11 +1066,14 @@ public sealed class RecordingEditorWindow : Window
             redo: () => host.Children.Remove(el));
     }
 
+    /// <summary>Topmost annotation under <paramref name="p"/> (blur regions render above
+    /// _annoHost, so they win a tie).</summary>
     private FrameworkElement? HitAnnotation(Point p)
     {
-        for (int i = _annoHost.Children.Count - 1; i >= 0; i--)
-            if (_annoHost.Children[i] is FrameworkElement el && AnnotationBounds(el).Contains(p))
-                return el;
+        foreach (var host in new[] { _blurHost, _annoHost })
+            for (int i = host.Children.Count - 1; i >= 0; i--)
+                if (host.Children[i] is FrameworkElement el && AnnotationBounds(el).Contains(p))
+                    return el;
         return null;
     }
 
@@ -1595,7 +1632,7 @@ public sealed class RecordingEditorWindow : Window
             _exportCts = new CancellationTokenSource();
             ok = await exporter.ExportAsync(ffmpeg, _sourcePath, path, format,
                 _trimStart, _trimEnd - _trimStart, _fps,
-                overlayPng, _blurs.Select(b => b.Region).ToList(), _exportCts.Token);
+                overlayPng, CurrentBlurRegions(), _exportCts.Token);
             cancelled = _exportCts.IsCancellationRequested;
             _exportCts.Dispose();
             _exportCts = null;

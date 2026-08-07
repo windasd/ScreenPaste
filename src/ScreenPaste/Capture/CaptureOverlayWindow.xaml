@@ -28,7 +28,6 @@
 
             <!-- The editing surface, positioned/sized to the selection in code. -->
             <Canvas x:Name="EditLayer" ClipToBounds="True" Visibility="Collapsed">
-                <Canvas x:Name="BlurHost"/>
                 <Canvas x:Name="ShapeHost" Canvas.Left="0" Canvas.Top="0"/>
                 <Canvas x:Name="StickerHost" Canvas.Left="0" Canvas.Top="0"/>
                 <!-- Focusable=False: InkCanvas class-binds Ctrl+C/X/V for stroke editing;
@@ -36,6 +35,9 @@
                 <InkCanvas x:Name="Ink" Background="Transparent" Focusable="False"
                            Canvas.Left="0" Canvas.Top="0"/>
                 <Canvas x:Name="TextHost" Canvas.Left="0" Canvas.Top="0"/>
+                <!-- Blur/mosaic sits on top of every annotation so a region can be dragged
+                     over strokes and shapes to hide them; it re-samples what is beneath. -->
+                <Canvas x:Name="BlurHost" Canvas.Left="0" Canvas.Top="0"/>
                 <Rectangle x:Name="InteractionLayer" Fill="#01000000"
                            IsHitTestVisible="False" Canvas.Left="0" Canvas.Top="0"/>
             </Canvas>
