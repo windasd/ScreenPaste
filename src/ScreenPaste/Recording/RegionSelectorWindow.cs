@@ -5,6 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using Microsoft.Win32;
 using ScreenPaste.Capture;
 using ScreenPaste.Native;
 using ScreenPaste.Settings;
@@ -127,7 +128,14 @@ public sealed class RegionSelectorWindow : Window
         _root.MouseLeftButtonUp += OnMouseUp;
         MouseWheel += OnDetectWheel;
         KeyDown += OnKeyDown;
-        Closed += (_, _) => _elements?.Cancel();
+        // A resolution / monitor change (common over RDP) invalidates the frozen backdrop
+        // and cached bounds, so the selection would drift — cancel out cleanly.
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        Closed += (_, _) =>
+        {
+            _elements?.Cancel();
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        };
         SourceInitialized += OnSourceInitialized;
         Loaded += (_, _) => { Activate(); Focus(); };
 
@@ -286,6 +294,18 @@ public sealed class RegionSelectorWindow : Window
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape) { DialogResult = false; Close(); e.Handled = true; }
+    }
+
+    /// <summary>Display geometry changed (e.g. an RDP resize): cancel — the frozen backdrop
+    /// and cached bounds no longer match the screen.</summary>
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!IsLoaded) return;
+            DialogResult = false;
+            Close();
+        });
     }
 
     private void UpdateMask(Rect? selection)

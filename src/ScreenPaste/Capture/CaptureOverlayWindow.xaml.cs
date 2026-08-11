@@ -177,7 +177,15 @@ public partial class CaptureOverlayWindow : Window
         RootCanvas.MouseLeftButtonUp += RootCanvas_MouseUp;
         MouseWheel += OnDetectLevelWheel;
         KeyDown += OnKeyDown;
-        Closed += (_, _) => _elements?.Cancel();
+        // A resolution / monitor change (common over RDP) invalidates the frozen
+        // screenshot and every cached physical coordinate, so the selection would drift
+        // against a screen that no longer matches.
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        Closed += (_, _) =>
+        {
+            _elements?.Cancel();
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        };
 
         // Tunneling handlers run before InkCanvas / InteractionLayer see the click:
         // direct-manipulation grab of annotations with ANY tool, and commit-on-click-
@@ -349,6 +357,17 @@ public partial class CaptureOverlayWindow : Window
         _detectLevel = Math.Clamp(_detectLevel + (e.Delta > 0 ? 1 : -1), 0, Math.Max(0, _detectCandidates - 1));
         UpdateDetect(Mouse.GetPosition(RootCanvas));
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Display geometry changed (resolution/monitor swap, e.g. an RDP resize). While still
+    /// framing the shot, bail out — the frozen backdrop and coordinates no longer match the
+    /// screen. Once editing, the annotations live on a fixed self-contained canvas, so the
+    /// user's work is left intact.
+    /// </summary>
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(() => { if (_phase == Phase.Selecting) Close(); });
     }
 
     private void RootCanvas_MouseUp(object sender, MouseButtonEventArgs e)

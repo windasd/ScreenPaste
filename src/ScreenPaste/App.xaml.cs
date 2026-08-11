@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using Microsoft.Win32;
 using ScreenPaste.Capture;
 using ScreenPaste.Native;
 using ScreenPaste.Output;
@@ -54,6 +55,12 @@ public partial class App : Application
         // (overlay, HUD, pins) simply have no title bar for this to affect.
         EventManager.RegisterClassHandler(typeof(Window), Window.LoadedEvent,
             new RoutedEventHandler((s, _) => { if (s is Window w) Theme.StyleTitleBar(w); }));
+
+        // A running recording captures a FIXED physical rect and its HUD is pinned to fixed
+        // physical coordinates; a resolution / monitor change (common over RDP) moves the
+        // desktop out from under both. The encoder stream size can't change mid-record, so
+        // stop cleanly and keep what was captured rather than let the frame drift.
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         Loc.Init(null);   // system language until settings load
 
@@ -336,6 +343,19 @@ public partial class App : Application
         }
     }
 
+    /// <summary>Display geometry changed: stop any in-progress recording (its fixed frame
+    /// would otherwise drift off the resized desktop) and tell the user why.</summary>
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_recorder == null) return;
+            _tray?.ShowBalloonTip(4000, "ScreenPaste",
+                Loc.T("rec.displayChanged"), Forms.ToolTipIcon.Warning);
+            StopRecording();
+        });
+    }
+
     private async void StopRecording()
     {
         var recorder = _recorder;
@@ -409,6 +429,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         _hotkey?.Dispose();
         if (_tray != null)
         {
