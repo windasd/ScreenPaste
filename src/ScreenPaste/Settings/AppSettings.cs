@@ -71,6 +71,8 @@ public sealed class AppSettings
     public string RecordFormat { get; set; } = "gif";   // gif | mp4 | webp
     public int RecordFps { get; set; } = 15;
     public bool RecordCaptureCursor { get; set; } = true;
+    // none | system | mic | both — audio only lands in MP4 (GIF/WebP are silent).
+    public string RecordAudioSource { get; set; } = "none";
     // true = 錄完直接輸出檔案（跳過修剪/匯出編輯器）
     public bool RecordSkipEditor { get; set; }
 

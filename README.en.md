@@ -43,6 +43,7 @@ After capturing, an **icon toolbar** pops up next to the cursor (draggable, and 
 - The editor has the same **annotation tools** as captures (text / shapes / line-arrow / stickers / gaussian blur / mosaic, with full option rows; annotations drag directly, `Delete` removes); `Ctrl+C` quick-exports and puts the file on the clipboard
 - Export as **GIF / MP4 / WebP**, switchable right in the editor; a setting can skip the editor and save immediately
 - Optional mouse-cursor capture, frame rate 10–30 fps
+- **Audio**: system sound (loopback) / microphone / both mixed, selectable in settings; sound is saved only in **MP4** (GIF and WebP are silent). With no usable audio device (common over remote desktop) it falls back to a silent recording
 - Encoded by the bundled `ffmpeg` — no separate install required
 
 ### More

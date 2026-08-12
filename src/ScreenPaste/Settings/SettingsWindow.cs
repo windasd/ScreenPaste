@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using ScreenPaste.Native;
+using ScreenPaste.Recording;
 using Forms = System.Windows.Forms;
 
 namespace ScreenPaste.Settings;
@@ -22,6 +23,7 @@ public sealed class SettingsWindow : Window
     private ComboBox _theme = null!;
     private ComboBox _recordFormat = null!;
     private ComboBox _recordFps = null!;
+    private ComboBox _recordAudio = null!;
     private CheckBox _recordCursor = null!;
     private CheckBox _recordSkipEditor = null!;
     private CheckBox _startup = null!;
@@ -103,6 +105,15 @@ public sealed class SettingsWindow : Window
             ("24", "24", null), ("30", "30", null),
         }, _s.RecordFps.ToString());
         body.Children.Add(Row(Loc.T("set.recordFps"), _recordFps));
+        _recordAudio = ValueCombo(new()
+        {
+            ("none", Loc.T("audio.none"), null),
+            ("system", Loc.T("audio.system"), null),
+            ("mic", Loc.T("audio.mic"), null),
+            ("both", Loc.T("audio.both"), null),
+        }, AudioSources.Parse(_s.RecordAudioSource).ToToken());
+        body.Children.Add(Row(Loc.T("set.recordAudio"), _recordAudio));
+        body.Children.Add(Hint(Loc.T("set.recordAudioHint")));
         _recordCursor = new CheckBox { IsChecked = _s.RecordCaptureCursor, Content = Loc.T("set.recordCursor"), Foreground = Theme.ForegroundBrush, VerticalAlignment = VerticalAlignment.Center };
         body.Children.Add(Row("", _recordCursor));
         _recordSkipEditor = new CheckBox { IsChecked = _s.RecordSkipEditor, Content = Loc.T("set.skipEditor"), Foreground = Theme.ForegroundBrush, VerticalAlignment = VerticalAlignment.Center };
@@ -148,6 +159,7 @@ public sealed class SettingsWindow : Window
         _s.QuickSaveHotkey = _quickSave.Text.Trim();
 
         _s.RecordFormat = ComboValue(_recordFormat);
+        _s.RecordAudioSource = ComboValue(_recordAudio);
         _s.RecordCaptureCursor = _recordCursor.IsChecked == true;
         _s.RecordSkipEditor = _recordSkipEditor.IsChecked == true;
         if (int.TryParse(ComboValue(_recordFps), out var fps)) _s.RecordFps = fps;
@@ -206,6 +218,13 @@ public sealed class SettingsWindow : Window
     {
         Text = t, FontWeight = FontWeights.Bold, FontSize = 14,
         Foreground = new SolidColorBrush(Theme.Accent), Margin = new Thickness(0, 12, 0, 6),
+    };
+
+    /// <summary>A muted, indented one-line note under a row.</summary>
+    private static TextBlock Hint(string t) => new()
+    {
+        Text = t, FontSize = 11, Opacity = 0.7, TextWrapping = TextWrapping.Wrap,
+        Foreground = Theme.ForegroundBrush, Margin = new Thickness(0, 0, 0, 4),
     };
 
     private static FrameworkElement Row(string label, FrameworkElement control)

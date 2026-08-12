@@ -22,8 +22,10 @@ public sealed class ScreenRecorder
     private volatile int _x, _y;              // capture origin; movable mid-recording
     private readonly RecordingFormat? _format;
     private readonly bool _captureCursor;
+    private readonly AudioSource _audioSource;
 
     private FFmpegEncoder? _encoder;
+    private AudioCapture? _audio;
     private Bitmap? _bmp;
     private Graphics? _g;
     private byte[] _buffer = Array.Empty<byte>();
@@ -38,6 +40,13 @@ public sealed class ScreenRecorder
     public int FrameWidth => _w;
     public int FrameHeight => _h;
 
+    /// <summary>True when audio was requested and at least one device is live; false means
+    /// the recording is silent (either not requested, or degraded — no usable device).</summary>
+    public bool AudioActive { get; private set; }
+
+    /// <summary>True when audio was requested but could not be captured (degraded to silent).</summary>
+    public bool AudioDegraded { get; private set; }
+
     /// <summary>
     /// Move the capture origin mid-recording (the frame SIZE is fixed by the encoder
     /// stream). The capture loop picks the new origin up on its next frame.
@@ -51,7 +60,7 @@ public sealed class ScreenRecorder
     /// <param name="format">Final output format, or null to record a near-lossless
     /// intermediate MP4 that the post-recording editor trims and re-encodes.</param>
     public ScreenRecorder(Int32Rect screenRegion, int fps, RecordingFormat? format,
-                          string outputPath, bool captureCursor)
+                          string outputPath, bool captureCursor, AudioSource audioSource = AudioSource.None)
     {
         _x = screenRegion.X;
         _y = screenRegion.Y;
@@ -61,6 +70,7 @@ public sealed class ScreenRecorder
         _fps = Math.Clamp(fps, 2, 30);
         _format = format;
         _captureCursor = captureCursor;
+        _audioSource = audioSource;
         OutputPath = outputPath;
     }
 
@@ -69,7 +79,28 @@ public sealed class ScreenRecorder
     {
         var ffmpeg = FFmpegLocator.Find() ?? throw new FFmpegNotFoundException();
 
-        _encoder = new FFmpegEncoder(ffmpeg, _w, _h, _fps, _format, OutputPath);
+        // Audio only rides in a container that carries it: the intermediate MP4 (null
+        // format) or a direct-save MP4. GIF/WebP are silent, so don't even open a device.
+        bool audioContainer = _format is null or RecordingFormat.Mp4;
+        AudioStreamInfo? audioInfo = null;
+        if (_audioSource != AudioSource.None && audioContainer)
+        {
+            var probe = AudioCapture.TryOpen(_audioSource);
+            if (probe.Active)
+            {
+                _audio = probe;
+                AudioActive = true;
+                audioInfo = new AudioStreamInfo(AudioCapture.SampleRate, AudioCapture.Channels);
+            }
+            else
+            {
+                probe.Dispose();
+                AudioDegraded = true;   // requested, but no usable device → record silently
+            }
+        }
+
+        _encoder = new FFmpegEncoder(ffmpeg, _w, _h, _fps, _format, OutputPath, audioInfo);
+        _audio?.StartPump((buf, len) => _encoder!.WriteAudio(buf, len));
 
         _bmp = new Bitmap(_w, _h, PixelFormat.Format32bppArgb);
         _g = Graphics.FromImage(_bmp);
@@ -142,6 +173,11 @@ public sealed class ScreenRecorder
     {
         _stop = true;
         _thread?.Join(3000);
+
+        // Stop the audio pump first so no more PCM is written, then let FinishAsync EOF the
+        // pipe and flush ffmpeg.
+        _audio?.Dispose();
+        _audio = null;
 
         bool ok = _encoder != null && await _encoder.FinishAsync();
 

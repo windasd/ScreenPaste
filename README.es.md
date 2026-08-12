@@ -43,6 +43,7 @@ Tras capturar, aparece una **barra de herramientas** junto al cursor (arrastrabl
 - El editor tiene las mismas **herramientas de anotación** que las capturas (texto / formas / línea-flecha / imágenes / desenfoque gaussiano / mosaico, con sus opciones; las anotaciones se arrastran directamente, `Supr` las elimina); `Ctrl+C` exporta rápido y pone el archivo en el portapapeles
 - Exporta como **GIF / MP4 / WebP**, cambiable en el propio editor; un ajuste permite saltarse el editor y guardar inmediatamente
 - Captura opcional del cursor, tasa de fotogramas de 10–30 fps
+- **Audio**: sonido del sistema (loopback) / micrófono / ambos mezclados, seleccionable en ajustes; el sonido solo se guarda en **MP4** (GIF y WebP son silenciosos). Sin un dispositivo de audio utilizable (habitual en escritorio remoto) se graba sin sonido
 - Codificación con el `ffmpeg` incluido — sin instalaciones adicionales
 
 ### Más

@@ -43,6 +43,7 @@ Nach der Aufnahme erscheint neben dem Cursor eine **Symbol-Werkzeugleiste** (ver
 - Der Editor hat dieselben **Anmerkungswerkzeuge** wie Aufnahmen (Text / Formen / Linie-Pfeil / Bilder / Gauß-Weichzeichner / Mosaik, mit Optionszeilen; Anmerkungen lassen sich direkt ziehen, `Entf` löscht); `Strg+C` exportiert schnell und legt die Datei in die Zwischenablage
 - Export als **GIF / MP4 / WebP**, direkt im Editor umschaltbar; eine Einstellung überspringt den Editor und speichert sofort
 - Optionale Mauszeiger-Aufnahme, Bildrate 10–30 fps
+- **Audio**: Systemklang (Loopback) / Mikrofon / beides gemischt, in den Einstellungen wählbar; Ton wird nur in **MP4** gespeichert (GIF und WebP sind stumm). Ohne nutzbares Audiogerät (bei Remotedesktop häufig) wird ohne Ton aufgenommen
 - Kodierung durch das mitgelieferte `ffmpeg` — keine separate Installation nötig
 
 ### Sonstiges

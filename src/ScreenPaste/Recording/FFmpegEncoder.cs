@@ -1,13 +1,19 @@
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Text;
 
 namespace ScreenPaste.Recording;
+
+/// <summary>Audio muxed alongside the video: raw PCM (f32le) fed over a named pipe.</summary>
+public readonly record struct AudioStreamInfo(int SampleRate, int Channels);
 
 /// <summary>
 /// Pipes raw BGRA frames into a bundled ffmpeg process, which encodes them either to a
 /// final format (GIF/MP4/WebP) or — when no format is given — to a near-lossless
 /// intermediate MP4 that the post-recording editor previews and re-encodes from.
+/// When <see cref="AudioStreamInfo"/> is supplied, a second (audio) input is fed as raw
+/// f32le PCM over a Windows named pipe and muxed into the output.
 /// One instance per recording.
 /// </summary>
 public sealed class FFmpegEncoder : IDisposable
@@ -15,6 +21,8 @@ public sealed class FFmpegEncoder : IDisposable
     private readonly Process _proc;
     private readonly Stream _stdin;
     private readonly StringBuilder _stderrTail = new();
+    private readonly NamedPipeServerStream? _audioPipe;
+    private volatile bool _audioConnected;
     private bool _faulted;
     private bool _finished;
 
@@ -24,9 +32,19 @@ public sealed class FFmpegEncoder : IDisposable
     public string Diagnostics => _stderrTail.ToString();
 
     public FFmpegEncoder(string ffmpegPath, int width, int height, int fps,
-                         RecordingFormat? format, string outputPath)
+                         RecordingFormat? format, string outputPath, AudioStreamInfo? audio = null)
     {
         OutputPath = outputPath;
+
+        string? audioPipePath = null;
+        if (audio is { } a)
+        {
+            // Async server so WriteAudio can block-write while ffmpeg drains the pipe.
+            string name = "screenpaste_aud_" + Guid.NewGuid().ToString("N");
+            _audioPipe = new NamedPipeServerStream(name, PipeDirection.Out, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            audioPipePath = @"\\.\pipe\" + name;
+        }
 
         var psi = new ProcessStartInfo
         {
@@ -36,8 +54,8 @@ public sealed class FFmpegEncoder : IDisposable
             RedirectStandardInput = true,
             RedirectStandardError = true,
         };
-        foreach (var a in BuildArguments(width, height, fps, format, outputPath))
-            psi.ArgumentList.Add(a);
+        foreach (var arg in BuildArguments(width, height, fps, format, outputPath, audio, audioPipePath))
+            psi.ArgumentList.Add(arg);
 
         _proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
         _proc.ErrorDataReceived += (_, e) =>
@@ -50,22 +68,54 @@ public sealed class FFmpegEncoder : IDisposable
         _proc.Start();
         _proc.BeginErrorReadLine();
         _stdin = _proc.StandardInput.BaseStream;
+
+        // ffmpeg opens the audio pipe as a client right after launch; accept it in the
+        // background so leading audio (dropped until connected) never blocks startup.
+        if (_audioPipe != null)
+        {
+            _ = _audioPipe.WaitForConnectionAsync().ContinueWith(t =>
+            {
+                if (t.IsCompletedSuccessfully) _audioConnected = true;
+            });
+        }
     }
 
     private static IEnumerable<string> BuildArguments(int w, int h, int fps,
-        RecordingFormat? format, string output)
+        RecordingFormat? format, string output, AudioStreamInfo? audio, string? audioPipePath)
     {
         var args = new List<string>
         {
             "-y",
+            // Video input (input 0): raw BGRA over stdin.
             "-f", "rawvideo",
             "-pixel_format", "bgra",
             "-video_size", $"{w}x{h}",
             "-framerate", fps.ToString(),
             "-i", "pipe:0",
-            "-an",
         };
+
+        if (audio is { } a)
+        {
+            // Audio input (input 1): raw float PCM over the named pipe.
+            args.AddRange(new[]
+            {
+                "-f", "f32le", "-ar", a.SampleRate.ToString(), "-ac", a.Channels.ToString(),
+                "-i", audioPipePath!,
+                "-map", "0:v:0", "-map", "1:a:0",
+            });
+        }
+        else
+        {
+            args.Add("-an");
+        }
+
         args.AddRange(format is { } f ? OutputArgs(f, fps) : IntermediateArgs);
+
+        if (audio != null)
+        {
+            args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
+        }
+
         args.Add(output);
         return args;
     }
@@ -139,13 +189,33 @@ public sealed class FFmpegEncoder : IDisposable
         }
     }
 
+    /// <summary>
+    /// Feed PCM audio (raw f32le). Dropped until ffmpeg has connected to the pipe and after
+    /// the encoder has faulted or finished. Once committed, the pump must keep calling this
+    /// until <see cref="FinishAsync"/> so ffmpeg's audio input never stalls the mux.
+    /// </summary>
+    public void WriteAudio(byte[] pcm, int length)
+    {
+        if (_audioPipe == null || !_audioConnected || _faulted || _finished) return;
+        try
+        {
+            _audioPipe.Write(pcm, 0, length);
+        }
+        catch
+        {
+            _faulted = true;
+        }
+    }
+
     /// <summary>Close the pipe and wait for ffmpeg to flush the file. Returns true on success.</summary>
     public async Task<bool> FinishAsync()
     {
         if (_finished) return !_faulted && _proc.ExitCode == 0;
         _finished = true;
 
+        // EOF both inputs so ffmpeg finalizes: stdin (video) and the audio pipe.
         try { _stdin.Flush(); _stdin.Close(); } catch { /* already gone */ }
+        try { _audioPipe?.Dispose(); } catch { /* already gone */ }
 
         try
         {
@@ -163,6 +233,7 @@ public sealed class FFmpegEncoder : IDisposable
 
     public void Dispose()
     {
+        try { _audioPipe?.Dispose(); } catch { /* ignore */ }
         try { if (!_proc.HasExited) _proc.Kill(); } catch { /* ignore */ }
         _proc.Dispose();
     }

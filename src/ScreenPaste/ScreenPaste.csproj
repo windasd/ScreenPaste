@@ -27,6 +27,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- WASAPI capture of system-audio loopback and the microphone for recordings. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
     <!-- Decodes PNG / JPEG / WebP for the paste-image (sticker) feature. -->
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
   </ItemGroup>
@@ -37,8 +39,7 @@
        next to the exe on publish — the installer and portable zip package it from
        there, and FFmpegLocator finds it via AppContext.BaseDirectory. -->
   <ItemGroup>
-    <None Include="ffmpeg\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="ffmpeg\"
-          ExcludeFromSingleFile="true" />
+    <None Include="ffmpeg\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="ffmpeg\" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
   <!-- Keep WinForms/Drawing OUT of the implicit global usings so WPF types

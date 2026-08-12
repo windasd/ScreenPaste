@@ -323,9 +323,15 @@ public partial class App : Application
         try
         {
             var recorder = new ScreenRecorder(region, _settings.RecordFps, format, path,
-                _settings.RecordCaptureCursor);
+                _settings.RecordCaptureCursor, AudioSources.Parse(_settings.RecordAudioSource));
             recorder.Start();
             _recorder = recorder;
+
+            // Requested audio but no usable device (common over RDP): keep recording, but
+            // let the user know it will be silent.
+            if (recorder.AudioDegraded)
+                _tray?.ShowBalloonTip(4000, "ScreenPaste",
+                    Loc.T("rec.audioUnavailable"), Forms.ToolTipIcon.Warning);
 
             _hud = new RecordingHud(region);
             _hud.StopRequested += StopRecording;

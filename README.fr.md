@@ -43,6 +43,7 @@ Après la capture, une **barre d'outils** apparaît près du curseur (déplaçab
 - L'éditeur offre les mêmes **outils d'annotation** que les captures (texte / formes / ligne-flèche / images / flou gaussien / mosaïque, avec leurs options ; les annotations se déplacent directement, `Suppr` les supprime) ; `Ctrl+C` exporte rapidement et place le fichier dans le presse-papiers
 - Export en **GIF / MP4 / WebP**, commutable dans l'éditeur ; une option permet de sauter l'éditeur et d'enregistrer immédiatement
 - Capture du curseur optionnelle, fréquence d'images 10–30 fps
+- **Audio** : son système (loopback) / microphone / les deux mixés, au choix dans les réglages ; le son n'est enregistré qu'en **MP4** (GIF et WebP sont muets). Sans périphérique audio utilisable (fréquent en bureau à distance), l'enregistrement se fait sans son
 - Encodage par le `ffmpeg` fourni — aucune installation supplémentaire
 
 ### Divers

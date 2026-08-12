@@ -56,10 +56,16 @@ public sealed class RecordingExporter
         }
         psi.ArgumentList.Add("-t");
         psi.ArgumentList.Add(durationSeconds.ToString("0.###", inv));
-        psi.ArgumentList.Add("-an");
+
+        // Only MP4 carries audio; GIF/WebP are silent formats, so their tracks are dropped.
+        // `-t` above trims audio and video together, keeping them in sync.
+        bool wantAudio = format == RecordingFormat.Mp4;
 
         if (overlayPngPath == null && blurRegions.Count == 0)
         {
+            // No explicit map: ffmpeg auto-selects the video (and audio, if present); -vf
+            // applies to the video stream.
+            if (!wantAudio) psi.ArgumentList.Add("-an");
             foreach (var a in FFmpegEncoder.OutputArgs(format, fps)) psi.ArgumentList.Add(a);
         }
         else
@@ -68,7 +74,24 @@ public sealed class RecordingExporter
             psi.ArgumentList.Add(BuildFilterGraph(format, overlayPngPath != null, blurRegions, out var finalLabel));
             psi.ArgumentList.Add("-map");
             psi.ArgumentList.Add(finalLabel);
+            if (wantAudio)
+            {
+                psi.ArgumentList.Add("-map");
+                psi.ArgumentList.Add("0:a?");   // recording's audio, if any (optional)
+            }
+            else
+            {
+                psi.ArgumentList.Add("-an");
+            }
             foreach (var a in FFmpegEncoder.CodecArgs(format, fps)) psi.ArgumentList.Add(a);
+        }
+
+        if (wantAudio)
+        {
+            psi.ArgumentList.Add("-c:a");
+            psi.ArgumentList.Add("aac");
+            psi.ArgumentList.Add("-b:a");
+            psi.ArgumentList.Add("192k");
         }
 
         psi.ArgumentList.Add("-progress");
