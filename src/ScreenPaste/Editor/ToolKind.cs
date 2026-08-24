@@ -10,6 +10,7 @@ public enum ToolKind
     Line,          // 直線：兩端可各自選擇是否為箭頭
     Sticker,       // 貼圖：貼上 PNG / JPEG / WebP 圖片
     Blur,          // 模糊：於選項列再選高斯 / 馬賽克
+    Magnify,       // 局部放大：框出來源區域，旁邊放大顯示（形狀 / 倍率 / 邊框 / 連接線）
 }
 
 /// <summary>形狀子類型。</summary>

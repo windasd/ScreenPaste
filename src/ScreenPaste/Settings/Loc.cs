@@ -163,6 +163,14 @@ public static class Loc
         Add("line.arrowEnd", "End arrow",            "終點箭頭",       "終点の矢印",         "끝 화살표",        "Flèche à la fin",   "Pfeil am Ende",     "Flecha al final");
         Add("tool.sticker",  "Paste image",          "貼圖",          "画像を貼り付け",      "이미지 붙여넣기",  "Coller une image",  "Bild einfügen",     "Pegar imagen");
         Add("tool.blur",     "Blur",                 "模糊",          "ぼかし",             "흐림",            "Flou",              "Weichzeichnen",     "Desenfoque");
+        Add("tool.magnify",  "Magnifier",            "局部放大",      "拡大表示",           "부분 확대",       "Loupe",             "Lupe",              "Lupa");
+        Add("magnify.hint",  "drag to frame the area to enlarge; the wheel re-zooms it once selected", "拖曳框出要放大的區域；選取後可以滾輪調倍率", "拡大したい範囲をドラッグで囲む；選択中はホイールで倍率を変更", "확대할 영역을 드래그하세요. 선택 후 휠로 배율 조정", "glissez pour cadrer la zone à agrandir ; molette pour le zoom", "Bereich zum Vergrößern aufziehen; Rad ändert den Zoom", "arrastra para encuadrar el área; la rueda cambia el zoom");
+        Add("lbl.zoom",      "Zoom",                 "倍率",          "倍率",              "배율",            "Zoom",              "Zoom",              "Zoom");
+        Add("lbl.border",    "Border",               "邊框",          "枠線",              "테두리",          "Bordure",           "Rahmen",            "Borde");
+        Add("magnify.connector","Connector",         "連接線",    "引き線",            "연결선",          "Trait de liaison",  "Verbindung",        "Conector");
+        Add("magnify.shadow","Shadow",               "陰影",          "影",                "그림자",          "Ombre",             "Schatten",          "Sombra");
+        Add("magnify.smooth","Smooth",               "平滑",          "滑らか",            "부드럽게",      "Lissage",           "Glätten",          "Suavizado");
+        Add("magnify.withAnnotations","With annotations","含標註",  "注釈を含む",        "주석 포함",      "Avec annotations",  "Mit Anmerkungen",   "Con anotaciones");
 
         // Actions (hotkey appended in code)
         Add("action.undo",   "Undo",                 "復原",          "元に戻す",           "실행 취소",        "Annuler",           "Rückgängig",        "Deshacer");

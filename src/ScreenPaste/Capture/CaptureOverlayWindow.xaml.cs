@@ -83,6 +83,18 @@ public partial class CaptureOverlayWindow : Window
     private Image? _stickerDrag;
     private Point _stickerGrab;
 
+    // Magnifier-annotation ("local zoom") settings + framing-drag state. NOTE: unrelated
+    // to the _mag* fields below, which drive the pixel loupe that follows the cursor.
+    private ShapeKind _magnifyShape = ShapeKind.RoundedRectangle;
+    private double _magnifyZoom = 2.5;
+    private double _magnifyBorderWidth = 3;
+    private Color _magnifyBorderColor;
+    private bool _magnifyConnector = true, _magnifyShadow = true, _magnifySmooth = true;
+    private bool _magnifyWithAnnotations = true;
+    private bool _magnifyDragging;
+    private Point _magnifyStart;
+    private Rectangle? _magnifyPreview;
+
     // Magnifier state (framing + region-adjust drags)
     private const int MagSrcW = 30, MagSrcH = 22, MagZoom = 6;   // 30×22 px shown at 180×132
     private byte[]? _pixels;                  // cached BGRA snapshot for pixel lookups
@@ -109,10 +121,11 @@ public partial class CaptureOverlayWindow : Window
 
     // Toolbar controls we need to read/update
     private Slider _widthSlider = null!, _opacitySlider = null!, _blurSlider = null!, _textSizeSlider = null!, _shapeWidthSlider = null!, _lineWidthSlider = null!;
+    private Slider _magnifyZoomSlider = null!, _magnifyBorderSlider = null!;
     private readonly List<Color> _customColors = new();   // picker-added swatches (persisted)
     private readonly List<Button> _customSwatchButtons = new();   // their buttons, across all panels
     private const int MaxCustomColors = 8;
-    private StackPanel _blurOptionsPanel = null!, _penOptionsPanel = null!, _textOptionsPanel = null!, _shapeOptionsPanel = null!, _lineOptionsPanel = null!, _stickerOptionsPanel = null!;
+    private StackPanel _blurOptionsPanel = null!, _penOptionsPanel = null!, _textOptionsPanel = null!, _shapeOptionsPanel = null!, _lineOptionsPanel = null!, _stickerOptionsPanel = null!, _magnifyOptionsPanel = null!;
     private Button _arrowStartButton = null!, _arrowEndButton = null!;
     private ComboBox _fontCombo = null!;
     private Button _boldButton = null!, _italicButton = null!, _strikeButton = null!;
@@ -121,6 +134,9 @@ public partial class CaptureOverlayWindow : Window
     private readonly List<Button> _blurKindButtons = new();
     private readonly List<Button> _shapeKindButtons = new();
     private readonly List<Button> _shapeStyleButtons = new();
+    private readonly List<Button> _magnifyShapeButtons = new();
+    private Button _magnifyConnectorButton = null!, _magnifyShadowButton = null!,
+                   _magnifySmoothButton = null!, _magnifyAnnotationsButton = null!;
 
     public CaptureOverlayWindow(BitmapSource screenshot, VirtualScreen vs, AppSettings settings)
     {
@@ -151,6 +167,14 @@ public partial class CaptureOverlayWindow : Window
         _lineWidth = settings.LineWidth;
         _lineArrowStart = settings.LineArrowStart;
         _lineArrowEnd = settings.LineArrowEnd;
+        _magnifyShape = Enum.TryParse<ShapeKind>(settings.MagnifyShape, out var mk) ? mk : ShapeKind.RoundedRectangle;
+        _magnifyZoom = Math.Clamp(settings.MagnifyZoom, MagnifyEffects.MinZoom, MagnifyEffects.MaxZoom);
+        _magnifyBorderWidth = Math.Clamp(settings.MagnifyBorderWidth, 0, 12);
+        _magnifyBorderColor = ParseColor(settings.MagnifyBorderColor, Colors.Red);
+        _magnifyConnector = settings.MagnifyConnector;
+        _magnifyShadow = settings.MagnifyShadow;
+        _magnifySmooth = settings.MagnifySmooth;
+        _magnifyWithAnnotations = settings.MagnifyIncludeAnnotations;
 
         foreach (var hex in settings.CustomColors)
         {
@@ -214,8 +238,8 @@ public partial class CaptureOverlayWindow : Window
 
         _history.Changed += UpdateHistoryButtons;
         // Every edit (and every undo/redo) funnels through the history, so this is the one
-        // place that has to re-sample the blur regions over the new content.
-        _history.Changed += InvalidateBlurs;
+        // place that has to re-sample the blur and magnifier regions over the new content.
+        _history.Changed += InvalidateSampledLayers;
 
         UpdateMask(null);
     }
@@ -350,9 +374,22 @@ public partial class CaptureOverlayWindow : Window
         }
     }
 
-    /// <summary>Mouse wheel while framing: cycle the detection level (element ⇄ window).</summary>
+    /// <summary>Mouse wheel while framing: cycle the detection level (element ⇄ window).
+    /// While editing, it re-zooms the selected magnifier instead.</summary>
     private void OnDetectLevelWheel(object sender, MouseWheelEventArgs e)
     {
+        if (_phase == Phase.Editing)
+        {
+            if (_selected?.Parent == MagnifyHost && MagnifyEffects.SpecOf(_selected) is { } spec &&
+                MagnifyEffects.SetZoom(_selected, spec.Zoom + (e.Delta > 0 ? 0.5 : -0.5)))
+            {
+                ResampleMagnifier(_selected);
+                MagnifyHost.UpdateLayout();   // the view just resized; re-fit the marching box
+                UpdateSelectionBox();
+                e.Handled = true;
+            }
+            return;
+        }
         if (_phase != Phase.Selecting || _dragging || _detectRect == null) return;
         _detectLevel = Math.Clamp(_detectLevel + (e.Delta > 0 ? 1 : -1), 0, Math.Max(0, _detectCandidates - 1));
         UpdateDetect(Mouse.GetPosition(RootCanvas));
@@ -495,6 +532,7 @@ public partial class CaptureOverlayWindow : Window
     private static readonly string GlyphLine = Glyph(0xE72A);        // Forward (arrow) — line/arrow tool
     private static readonly string GlyphSticker = Glyph(0xE8B9);     // Pictures (paste image)
     private static readonly string GlyphBlur = Glyph(0xE80A);        // GridView (mosaic look)
+    private static readonly string GlyphMagnify = Glyph(0xE71E);     // Zoom (magnifier glass)
     private static readonly string GlyphUndo = Glyph(0xE7A7);        // Undo
     private static readonly string GlyphRedo = Glyph(0xE7A6);        // Redo
     private static readonly string GlyphCopy = Glyph(0xE8C8);        // Copy
@@ -522,6 +560,8 @@ public partial class CaptureOverlayWindow : Window
         toolsRow.Children.Add(MakeToolButton(GlyphLine, Loc.T("tool.line"), ToolKind.Line));
         toolsRow.Children.Add(MakeToolButton(GlyphSticker, Loc.T("tool.sticker"), ToolKind.Sticker));
         toolsRow.Children.Add(MakeToolButton(GlyphBlur, Loc.T("tool.blur"), ToolKind.Blur));
+        toolsRow.Children.Add(MakeToolButton(GlyphMagnify,
+            Loc.T("tool.magnify") + " - " + Loc.T("magnify.hint"), ToolKind.Magnify));
         toolsRow.Children.Add(MakeSeparator());
         _undoButton = MakeActionButton(GlyphUndo, Loc.T("action.undo") + " (" + _settings.UndoHotkey + ")", () => _history.Undo());
         _redoButton = MakeActionButton(GlyphRedo, Loc.T("action.redo") + " (" + _settings.RedoHotkey + ")", () => _history.Redo());
@@ -561,6 +601,53 @@ public partial class CaptureOverlayWindow : Window
         _blurOptionsPanel.Children.Add(_blurSlider);
         _blurOptionsPanel.Children.Add(ValueReadout(_blurSlider, v => v.ToString("0")));
         ToolbarStack.Children.Add(_blurOptionsPanel);
+
+        // ---- Magnifier options (shape / zoom / border / connector / shadow / smoothing) ----
+        _magnifyOptionsPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+        _magnifyOptionsPanel.Children.Add(Label(Loc.T("lbl.shape")));
+        _magnifyOptionsPanel.Children.Add(MakeMagnifyShapeButton(Loc.T("shape.rect"), ShapeKind.Rectangle));
+        _magnifyOptionsPanel.Children.Add(MakeMagnifyShapeButton(Loc.T("shape.rounded"), ShapeKind.RoundedRectangle));
+        _magnifyOptionsPanel.Children.Add(MakeMagnifyShapeButton(Loc.T("shape.ellipse"), ShapeKind.Ellipse));
+        _magnifyOptionsPanel.Children.Add(Label(Loc.T("lbl.zoom")));
+        _magnifyZoomSlider = new Slider
+        {
+            Minimum = MagnifyEffects.MinZoom,
+            Maximum = MagnifyEffects.MaxZoom,
+            Width = 90,
+            VerticalAlignment = VerticalAlignment.Center,
+            Value = _magnifyZoom,
+        };
+        _magnifyZoomSlider.ValueChanged += (_, e) => _magnifyZoom = e.NewValue;
+        _magnifyOptionsPanel.Children.Add(_magnifyZoomSlider);
+        _magnifyOptionsPanel.Children.Add(ValueReadout(_magnifyZoomSlider, v => v.ToString("0.0") + "×"));
+        _magnifyOptionsPanel.Children.Add(Label(Loc.T("lbl.border")));
+        _magnifyBorderSlider = new Slider
+        {
+            Minimum = 0,
+            Maximum = 12,
+            Width = 70,
+            VerticalAlignment = VerticalAlignment.Center,
+            Value = _magnifyBorderWidth,
+        };
+        _magnifyBorderSlider.ValueChanged += (_, e) => _magnifyBorderWidth = e.NewValue;
+        _magnifyOptionsPanel.Children.Add(_magnifyBorderSlider);
+        _magnifyOptionsPanel.Children.Add(ValueReadout(_magnifyBorderSlider, v => v.ToString("0")));
+        _magnifyConnectorButton = MakeSmallToggle(Loc.T("magnify.connector"));
+        _magnifyConnectorButton.Click += (_, _) => { _magnifyConnector = !_magnifyConnector; RefreshMagnifyToggles(); };
+        _magnifyShadowButton = MakeSmallToggle(Loc.T("magnify.shadow"));
+        _magnifyShadowButton.Click += (_, _) => { _magnifyShadow = !_magnifyShadow; RefreshMagnifyToggles(); };
+        _magnifySmoothButton = MakeSmallToggle(Loc.T("magnify.smooth"));
+        _magnifySmoothButton.Click += (_, _) => { _magnifySmooth = !_magnifySmooth; RefreshMagnifyToggles(); };
+        _magnifyAnnotationsButton = MakeSmallToggle(Loc.T("magnify.withAnnotations"));
+        _magnifyAnnotationsButton.Click += (_, _) => { _magnifyWithAnnotations = !_magnifyWithAnnotations; RefreshMagnifyToggles(); };
+        _magnifyOptionsPanel.Children.Add(_magnifyConnectorButton);
+        _magnifyOptionsPanel.Children.Add(_magnifyShadowButton);
+        _magnifyOptionsPanel.Children.Add(_magnifySmoothButton);
+        _magnifyOptionsPanel.Children.Add(_magnifyAnnotationsButton);
+        _magnifyOptionsPanel.Children.Add(Label(Loc.T("lbl.color")));
+        AddColorSwatches(_magnifyOptionsPanel);
+        RefreshMagnifyToggles();
+        ToolbarStack.Children.Add(_magnifyOptionsPanel);
 
         // ---- Text options (font / size / style / colour) ----
         _textOptionsPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
@@ -693,6 +780,15 @@ public partial class CaptureOverlayWindow : Window
         return b;
     }
 
+    private Button MakeMagnifyShapeButton(string text, ShapeKind kind)
+    {
+        var b = MakeSmallToggle(text);
+        b.Tag = kind;
+        b.Click += (_, _) => SelectMagnifyShape(kind);
+        _magnifyShapeButtons.Add(b);
+        return b;
+    }
+
     private static Button MakeSmallToggle(string text) => new()
     {
         Content = text,
@@ -710,6 +806,21 @@ public partial class CaptureOverlayWindow : Window
         _shapeKind = kind;
         foreach (var b in _shapeKindButtons)
             b.Background = (ShapeKind)b.Tag! == kind ? Theme.ActiveBrush : Theme.ButtonBgBrush;
+    }
+
+    private void SelectMagnifyShape(ShapeKind kind)
+    {
+        _magnifyShape = kind;
+        foreach (var b in _magnifyShapeButtons)
+            b.Background = (ShapeKind)b.Tag! == kind ? Theme.ActiveBrush : Theme.ButtonBgBrush;
+    }
+
+    private void RefreshMagnifyToggles()
+    {
+        _magnifyConnectorButton.Background = _magnifyConnector ? Theme.ActiveBrush : Theme.ButtonBgBrush;
+        _magnifyShadowButton.Background = _magnifyShadow ? Theme.ActiveBrush : Theme.ButtonBgBrush;
+        _magnifySmoothButton.Background = _magnifySmooth ? Theme.ActiveBrush : Theme.ButtonBgBrush;
+        _magnifyAnnotationsButton.Background = _magnifyWithAnnotations ? Theme.ActiveBrush : Theme.ButtonBgBrush;
     }
 
     private void SelectShapeStyle(bool filled)
@@ -933,7 +1044,7 @@ public partial class CaptureOverlayWindow : Window
         if (Palette.Contains(c) || _customColors.Contains(c)) return;
         _customColors.Add(c);
         if (_customColors.Count > MaxCustomColors) _customColors.RemoveAt(0);
-        foreach (var panel in new[] { _penOptionsPanel, _textOptionsPanel, _shapeOptionsPanel, _lineOptionsPanel })
+        foreach (var panel in new[] { _penOptionsPanel, _textOptionsPanel, _shapeOptionsPanel, _lineOptionsPanel, _magnifyOptionsPanel })
             panel.Children.Insert(panel.Children.Count - 1, MakeCustomSwatch(c));   // before the "+"
     }
 
@@ -964,6 +1075,7 @@ public partial class CaptureOverlayWindow : Window
         ToolKind.Text => _textColor,
         ToolKind.Shape => _shapeColor,
         ToolKind.Line => _lineColor,
+        ToolKind.Magnify => _magnifyBorderColor,
         _ => _penColor,
     };
 
@@ -971,7 +1083,7 @@ public partial class CaptureOverlayWindow : Window
     private void RefreshSwatchSelection()
     {
         var cur = ToolColor(_tool);
-        foreach (var panel in new[] { _penOptionsPanel, _textOptionsPanel, _shapeOptionsPanel, _lineOptionsPanel })
+        foreach (var panel in new[] { _penOptionsPanel, _textOptionsPanel, _shapeOptionsPanel, _lineOptionsPanel, _magnifyOptionsPanel })
         {
             foreach (var child in panel.Children)
             {
@@ -1031,6 +1143,7 @@ public partial class CaptureOverlayWindow : Window
             case ToolKind.Text: current = _textColor; opacity = _textColor.A / 255.0; break;
             case ToolKind.Shape: current = _shapeColor; opacity = _shapeColor.A / 255.0; break;
             case ToolKind.Line: current = _lineColor; opacity = _lineColor.A / 255.0; break;
+            case ToolKind.Magnify: current = _magnifyBorderColor; opacity = _magnifyBorderColor.A / 255.0; break;
             default: current = _penColor; opacity = _penOpacity; break;
         }
 
@@ -1062,6 +1175,11 @@ public partial class CaptureOverlayWindow : Window
         if (_tool == ToolKind.Line)
         {
             _lineColor = Color.FromArgb(a, rgb.R, rgb.G, rgb.B);
+            return;
+        }
+        if (_tool == ToolKind.Magnify)
+        {
+            _magnifyBorderColor = Color.FromArgb(a, rgb.R, rgb.G, rgb.B);
             return;
         }
 
@@ -1099,6 +1217,7 @@ public partial class CaptureOverlayWindow : Window
         bool isShape = kind is ToolKind.Shape;
         bool isLine = kind is ToolKind.Line;
         bool isSticker = kind is ToolKind.Sticker;
+        bool isMagnify = kind is ToolKind.Magnify;
         // Selection survives tool switches — grabbing works with every tool.
 
         _penOptionsPanel.Visibility = isPen ? Visibility.Visible : Visibility.Collapsed;
@@ -1107,6 +1226,7 @@ public partial class CaptureOverlayWindow : Window
         _shapeOptionsPanel.Visibility = isShape ? Visibility.Visible : Visibility.Collapsed;
         _lineOptionsPanel.Visibility = isLine ? Visibility.Visible : Visibility.Collapsed;
         _stickerOptionsPanel.Visibility = isSticker ? Visibility.Visible : Visibility.Collapsed;
+        _magnifyOptionsPanel.Visibility = isMagnify ? Visibility.Visible : Visibility.Collapsed;
 
         Ink.EditingMode = isPen ? InkCanvasEditingMode.Ink : InkCanvasEditingMode.None;
         Ink.IsHitTestVisible = isPen;
@@ -1114,7 +1234,7 @@ public partial class CaptureOverlayWindow : Window
         // move the whole selection; sticker mode lets clicks reach the sticker images
         // below so they can be dragged/resized. (Annotation grabbing is handled earlier
         // by the tunneling EditLayer handlers, for every tool.)
-        InteractionLayer.IsHitTestVisible = isBlur || isText || isShape || isLine || isNone;
+        InteractionLayer.IsHitTestVisible = isBlur || isText || isShape || isLine || isNone || isMagnify;
         InteractionLayer.Cursor = isNone ? Cursors.SizeAll : Cursors.Arrow;
 
         if (isPen) LoadPenControls();
@@ -1122,6 +1242,7 @@ public partial class CaptureOverlayWindow : Window
         if (isShape) { SelectShapeKind(_shapeKind); SelectShapeStyle(_shapeFilled); }
         if (isLine) RefreshArrowToggles();
         if (isSticker && StickerHost.Children.Count == 0) AddSticker();
+        if (isMagnify) { SelectMagnifyShape(_magnifyShape); RefreshMagnifyToggles(); }
         RefreshSwatchSelection();
     }
 
@@ -1181,6 +1302,7 @@ public partial class CaptureOverlayWindow : Window
         if (_tool == ToolKind.Text) { _textColor = Color.FromArgb(_textColor.A, c.R, c.G, c.B); ApplyTextStyle(); RefocusText(); }
         else if (_tool == ToolKind.Shape) { _shapeColor = Color.FromArgb(_shapeColor.A, c.R, c.G, c.B); }
         else if (_tool == ToolKind.Line) { _lineColor = Color.FromArgb(_lineColor.A, c.R, c.G, c.B); }
+        else if (_tool == ToolKind.Magnify) { _magnifyBorderColor = Color.FromArgb(_magnifyBorderColor.A, c.R, c.G, c.B); }
         else
         {
             if (_tool == ToolKind.Highlighter) _hlColor = c;
@@ -1209,6 +1331,7 @@ public partial class CaptureOverlayWindow : Window
         if (_tool == ToolKind.Text) { PlaceText(e.GetPosition(InteractionLayer)); return; }
         if (_tool == ToolKind.Shape) { Shape_MouseDown(e.GetPosition(InteractionLayer)); return; }
         if (_tool == ToolKind.Line) { Line_MouseDown(e.GetPosition(InteractionLayer)); return; }
+        if (_tool == ToolKind.Magnify) { Magnify_MouseDown(e.GetPosition(InteractionLayer)); return; }
         if (_tool != ToolKind.Blur) return;
 
         _blurDragging = true;
@@ -1231,6 +1354,7 @@ public partial class CaptureOverlayWindow : Window
         if (_regionMoving) { Region_MoveTo(e.GetPosition(RootCanvas)); return; }
         if (_shapeDragging) { Shape_MouseMove(e.GetPosition(InteractionLayer)); return; }
         if (_lineDragging) { Line_MouseMove(e.GetPosition(InteractionLayer)); return; }
+        if (_magnifyDragging) { Magnify_MouseMove(e.GetPosition(InteractionLayer)); return; }
         if (!_blurDragging || _blurPreview == null) return;
         var p = e.GetPosition(InteractionLayer);
         var r = MakeRect(_blurStart, p);
@@ -1245,6 +1369,7 @@ public partial class CaptureOverlayWindow : Window
         if (_regionMoving) { Region_MoveEnd(); return; }
         if (_shapeDragging) { Shape_MouseUp(e.GetPosition(InteractionLayer)); return; }
         if (_lineDragging) { Line_MouseUp(e.GetPosition(InteractionLayer)); return; }
+        if (_magnifyDragging) { Magnify_MouseUp(e.GetPosition(InteractionLayer)); return; }
         if (!_blurDragging) return;
         _blurDragging = false;
         InteractionLayer.ReleaseMouseCapture();
@@ -1267,22 +1392,34 @@ public partial class CaptureOverlayWindow : Window
             redo: () => { if (!BlurHost.Children.Contains(visual)) BlurHost.Children.Add(visual); });
     }
 
-    // ------------------------------------------------------ blur sampling ---
-    // A blur region shows whatever currently sits under the blur layer, so it covers the
-    // annotations beneath it and can be moved freely. `_blurBeneath` caches that composite
-    // (base screenshot + shapes + stickers + ink + text) and is dropped whenever an edit
-    // lands; a drag only re-crops from the cache, which keeps it cheap per frame.
+    // -------------------------------------------------- layer sampling ---
+    // Two layers re-read what currently sits under them: a blur region shows the pixels it
+    // covers (so it hides the annotations beneath it and can be moved freely), and a
+    // magnifier shows the pixels it was pointed at, enlarged. `_blurBeneath` /
+    // `_magnifyBeneath` cache those composites and are dropped whenever an edit lands; a
+    // drag only re-crops from the cache, which keeps it cheap per frame.
 
     private BitmapSource? _blurBeneath;
+    private BitmapSource? _magnifyBeneath;
+    private BitmapSource? _regionCrop;
 
-    private void InvalidateBlurs()
+    private void InvalidateSampledLayers()
     {
         _blurBeneath = null;
+        _magnifyBeneath = null;
+        _regionCrop = null;
         RefreshBlurs();
+        RefreshMagnifiers();   // after the blurs: a magnifier can enlarge blurred pixels
     }
 
     private BitmapSource BlurBeneath() => _blurBeneath ??= Compositor.ComposeBeneathBlur(
         _screenshot, _selection, Ink.Strokes, ShapeHost, StickerHost, TextHost);
+
+    private BitmapSource MagnifyBeneath() => _magnifyBeneath ??= Compositor.ComposeBeneathMagnify(
+        _screenshot, _selection, Ink.Strokes, BlurHost, ShapeHost, StickerHost, TextHost);
+
+    /// <summary>The bare screenshot crop, for magnifiers told to ignore other annotations.</summary>
+    private BitmapSource RegionCrop() => _regionCrop ??= Compositor.CropRegion(_screenshot, _selection);
 
     /// <summary>Re-sample every blur region from the content beneath the blur layer.</summary>
     private void RefreshBlurs()
@@ -1293,6 +1430,78 @@ public partial class CaptureOverlayWindow : Window
         foreach (var child in BlurHost.Children)
             if (child is FrameworkElement el && el != _blurPreview)
                 BlurEffects.Resample(el, beneath);
+    }
+
+    /// <summary>Re-sample every magnifier from the content it was told to enlarge.</summary>
+    private void RefreshMagnifiers()
+    {
+        if (_phase != Phase.Editing || MagnifyHost.Children.Count == 0) return;
+
+        foreach (var child in MagnifyHost.Children)
+            if (child is FrameworkElement el)
+                ResampleMagnifier(el);
+    }
+
+    private void ResampleMagnifier(FrameworkElement host)
+    {
+        if (MagnifyEffects.SpecOf(host) is not { } spec) return;   // skips the framing preview
+        MagnifyEffects.Resample(host, spec.IncludeAnnotations ? MagnifyBeneath() : RegionCrop());
+    }
+
+    // ---------------------------------------------------- magnifier tool ---
+    // Drag to frame the area to enlarge; the enlarged view is placed beside it and can then
+    // be dragged anywhere (its frame and connector stay pinned to the framed area), or
+    // re-zoomed with the mouse wheel while selected.
+
+    private void Magnify_MouseDown(Point start)
+    {
+        _magnifyDragging = true;
+        _magnifyStart = start;
+        _magnifyPreview = new Rectangle
+        {
+            Stroke = new SolidColorBrush(Theme.Accent),
+            StrokeThickness = 1,
+            StrokeDashArray = new DoubleCollection { 3, 2 },
+            Fill = new SolidColorBrush(Color.FromArgb(0x22, 0x3D, 0xA9, 0xFC)),
+        };
+        Canvas.SetLeft(_magnifyPreview, start.X);
+        Canvas.SetTop(_magnifyPreview, start.Y);
+        MagnifyHost.Children.Add(_magnifyPreview);
+        InteractionLayer.CaptureMouse();
+    }
+
+    private void Magnify_MouseMove(Point p)
+    {
+        if (_magnifyPreview == null) return;
+        var r = MakeRect(_magnifyStart, p);
+        Canvas.SetLeft(_magnifyPreview, r.X);
+        Canvas.SetTop(_magnifyPreview, r.Y);
+        _magnifyPreview.Width = r.Width;
+        _magnifyPreview.Height = r.Height;
+    }
+
+    private void Magnify_MouseUp(Point p)
+    {
+        _magnifyDragging = false;
+        InteractionLayer.ReleaseMouseCapture();
+
+        if (_magnifyPreview != null) MagnifyHost.Children.Remove(_magnifyPreview);
+        _magnifyPreview = null;
+
+        var region = new Rect(0, 0, _selection.Width, _selection.Height);
+        var source = MakeRect(_magnifyStart, p);
+        source.Intersect(region);
+        if (source.Width < 6 || source.Height < 6) return;
+
+        var spec = new MagnifySpec(source, _magnifyShape, _magnifyZoom, _magnifyBorderWidth,
+            _magnifyBorderColor, _magnifyConnector, _magnifyShadow, _magnifySmooth,
+            _magnifyWithAnnotations);
+        var visual = MagnifyEffects.Create(spec, region);
+        MagnifyHost.Children.Add(visual);   // the history push below re-samples it
+
+        _history.Push(
+            undo: () => MagnifyHost.Children.Remove(visual),
+            redo: () => { if (!MagnifyHost.Children.Contains(visual)) MagnifyHost.Children.Add(visual); });
     }
 
     // ------------------------------------------------------- shape tool ---
@@ -1583,14 +1792,14 @@ public partial class CaptureOverlayWindow : Window
         LayoutEditLayer(sel);
         LayoutHandles();
         PositionToolbar();
-        InvalidateBlurs();   // the region now covers different screenshot pixels
+        InvalidateSampledLayers();   // the region now covers different screenshot pixels
         if (_selected != null) UpdateSelectionBox();
     }
 
     /// <summary>Keep annotations pinned to the screenshot content while the region moves.</summary>
     private void ShiftAnnotations(int dx, int dy)
     {
-        foreach (var host in new[] { BlurHost, ShapeHost, StickerHost, TextHost })
+        foreach (var host in new[] { BlurHost, MagnifyHost, ShapeHost, StickerHost, TextHost })
         {
             foreach (var child in host.Children)
             {
@@ -1598,6 +1807,9 @@ public partial class CaptureOverlayWindow : Window
                 var tt = EnsureTranslate(el);
                 tt.X += dx;
                 tt.Y += dy;
+                // A magnifier frames its source in region-local coords too, so that has to
+                // travel along or the enlarged view would start showing a different area.
+                MagnifyEffects.ShiftSource(el, dx, dy);
             }
         }
         if (Ink.Strokes.Count > 0)
@@ -1669,6 +1881,9 @@ public partial class CaptureOverlayWindow : Window
             tt.Y = _moveOrigY + (p.Y - _moveGrab.Y);
             // A blur shows the pixels it currently sits over, so it has to follow the drag.
             if (_selected.Parent == BlurHost) BlurEffects.Resample(_selected, BlurBeneath());
+            // A magnifier keeps its content (it is tied to the framed source), but the frame
+            // and connector are drawn relative to the view, so they get rebuilt.
+            else if (_selected.Parent == MagnifyHost) MagnifyEffects.UpdateDecoration(_selected);
             UpdateSelectionBox();
             e.Handled = true;
             return;
@@ -1707,10 +1922,11 @@ public partial class CaptureOverlayWindow : Window
     }
 
     /// <summary>Topmost annotation whose bounds contain <paramref name="p"/> (host z-order:
-    /// blur above text above stickers above shapes/lines, matching the composite).</summary>
+    /// magnifier above blur above text above stickers above shapes/lines, matching the
+    /// composite). A magnifier is only grabbed by its enlarged view, not by its frame.</summary>
     private FrameworkElement? HitAnnotation(Point p)
     {
-        foreach (var host in new[] { BlurHost, TextHost, StickerHost, ShapeHost })
+        foreach (var host in new[] { MagnifyHost, BlurHost, TextHost, StickerHost, ShapeHost })
             for (int i = host.Children.Count - 1; i >= 0; i--)
                 if (host.Children[i] is FrameworkElement el && AnnotationBounds(el).Contains(p))
                     return el;
@@ -1995,7 +2211,7 @@ public partial class CaptureOverlayWindow : Window
         }
 
         // Re-arm click-to-place for the next text (if still on the text tool).
-        InteractionLayer.IsHitTestVisible = _tool is ToolKind.Text or ToolKind.Blur;
+        InteractionLayer.IsHitTestVisible = _tool is ToolKind.Text or ToolKind.Blur or ToolKind.Magnify;
     }
 
     // ----------------------------------------------------------- outputs ---
@@ -2003,8 +2219,13 @@ public partial class CaptureOverlayWindow : Window
     private BitmapSource Flatten()
     {
         CommitActiveText(discardIfEmpty: true);
-        InvalidateBlurs();   // make sure every region reflects the final annotation stack
-        return Compositor.Compose(_screenshot, _selection, Ink.Strokes, BlurHost, ShapeHost, StickerHost, TextHost);
+        InvalidateSampledLayers();   // make sure every region reflects the final annotation stack
+        // Re-sampling assigns new bitmaps to the blur/magnifier images, which invalidates
+        // their layout; RenderTargetBitmap draws whatever was last *arranged*, so flush the
+        // pending pass or a freshly sampled image would export at a stale (or zero) size.
+        EditLayer.UpdateLayout();
+        return Compositor.Compose(_screenshot, _selection, Ink.Strokes, BlurHost, MagnifyHost,
+            ShapeHost, StickerHost, TextHost);
     }
 
     private void DoCopy()
@@ -2091,6 +2312,14 @@ public partial class CaptureOverlayWindow : Window
         _settings.LineColor = ToHex(_lineColor);
         _settings.LineArrowStart = _lineArrowStart;
         _settings.LineArrowEnd = _lineArrowEnd;
+        _settings.MagnifyShape = _magnifyShape.ToString();
+        _settings.MagnifyZoom = _magnifyZoom;
+        _settings.MagnifyBorderWidth = _magnifyBorderWidth;
+        _settings.MagnifyBorderColor = ToHex(_magnifyBorderColor);
+        _settings.MagnifyConnector = _magnifyConnector;
+        _settings.MagnifyShadow = _magnifyShadow;
+        _settings.MagnifySmooth = _magnifySmooth;
+        _settings.MagnifyIncludeAnnotations = _magnifyWithAnnotations;
         _settings.CustomColors = _customColors.Select(ToHex).ToList();
         _settings.Save();
     }

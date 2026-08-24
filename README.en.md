@@ -26,6 +26,7 @@ After capturing, an **icon toolbar** pops up next to the cursor (draggable, and 
 - **Line / arrow** — drag to draw; each end can be toggled to an arrowhead; adjustable thickness and color; hold `Shift` to snap to 45° angles
 - **Stickers** — paste PNG / JPEG / WebP images, drag to move, scroll to resize
 - **Blur** — Gaussian blur / mosaic with adjustable strength; painted above every annotation, so a region hides the strokes and shapes under it, and it can be dragged to a new spot (it re-samples whatever it now covers)
+- **Magnifier** — drag to frame the area to enlarge and an enlarged view is placed next to it: rectangle / rounded / circle, with adjustable zoom (1.2–10×), border thickness and colour, connector, shadow, smoothing (off gives the hard pixel grid), and whether the enlarged content includes other annotations; the view can be dragged anywhere (its frame and connector keep pointing at the original area) and the wheel re-zooms it while selected
 - **Direct select / move** — hover any placed annotation and **drag it right away**; `Delete` removes it; moves and deletes are undoable
 - **Color picker** — Hex input, RGB and opacity (translucent colors preview over a checkerboard); custom colors are remembered across sessions, right-click a swatch to remove it
 - **Undo / Redo** — via buttons and hotkeys; every slider shows a live numeric readout

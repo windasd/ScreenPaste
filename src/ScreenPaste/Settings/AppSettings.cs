@@ -47,6 +47,17 @@ public sealed class AppSettings
     public string ShapeColor { get; set; } = "#FFFF3B30"; // red
     public double ShapeWidth { get; set; } = 3;
 
+    // ---- Magnifier ("local zoom") defaults ----
+    // 局部放大：框出來源區域，旁邊以放大鏡顯示放大後的內容
+    public string MagnifyShape { get; set; } = "RoundedRectangle";  // Rectangle | RoundedRectangle | Ellipse
+    public double MagnifyZoom { get; set; } = 2.5;                  // 放大倍率
+    public double MagnifyBorderWidth { get; set; } = 3;             // 邊框粗細（0 = 無邊框）
+    public string MagnifyBorderColor { get; set; } = "#FFFF3B30";   // red
+    public bool MagnifyConnector { get; set; } = true;              // 顯示與來源區域的連接線
+    public bool MagnifyShadow { get; set; } = true;                 // 陰影
+    public bool MagnifySmooth { get; set; } = true;                 // 平滑（關閉則顯示硬邊像素格）
+    public bool MagnifyIncludeAnnotations { get; set; } = true;     // 放大內容是否含其他標註
+
     // ---- Custom colour swatches added via the colour picker (hex, oldest first) ----
     public List<string> CustomColors { get; set; } = new();
 

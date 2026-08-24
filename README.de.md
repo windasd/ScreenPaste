@@ -26,6 +26,7 @@ Nach der Aufnahme erscheint neben dem Cursor eine **Symbol-Werkzeugleiste** (ver
 - **Linie / Pfeil** — zum Zeichnen ziehen; jedes Ende kann einzeln eine Pfeilspitze erhalten; Stärke und Farbe einstellbar; mit `Umschalt` an 45°-Winkeln einrasten
 - **Eingefügte Bilder** — PNG / JPEG / WebP einfügen, ziehen zum Verschieben, Mausrad zum Skalieren
 - **Weichzeichnen** — Gaußscher Weichzeichner / Mosaik, Stärke einstellbar; liegt über allen Anmerkungen und verdeckt damit auch Striche und Formen darunter, und lässt sich frei verschieben (der Bereich tastet danach die neue Stelle ab)
+- **Lupe** — den zu vergrößernden Bereich aufziehen; die vergrößerte Ansicht wird direkt daneben platziert: Rechteck / abgerundet / Kreis, einstellbarer Zoom (1,2–10×), Rahmenstärke und -farbe, Verbindungslinie, Schatten, Glätten (aus zeigt das harte Pixelraster) sowie die Wahl, ob andere Anmerkungen mit vergrößert werden; die Ansicht lässt sich frei verschieben (Rahmen und Verbindung zeigen weiter auf den ursprünglichen Bereich), das Mausrad ändert den Zoom der ausgewählten Lupe
 - **Direktes Auswählen / Verschieben** — fahren Sie über eine platzierte Anmerkung und **ziehen Sie sie direkt**; `Entf` löscht sie; Verschieben und Löschen sind rückgängig machbar
 - **Farbwähler** — Hex-Eingabe, RGB und Deckkraft (transluzente Farben werden über einem Schachbrett angezeigt); eigene Farben werden sitzungsübergreifend gespeichert, Rechtsklick auf ein Farbfeld entfernt es
 - **Rückgängig / Wiederholen** — per Schaltfläche und Tastenkürzel; jeder Schieberegler zeigt den aktuellen Wert an

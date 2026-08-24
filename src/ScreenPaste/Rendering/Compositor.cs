@@ -40,14 +40,11 @@ public static class Compositor
     }
 
     /// <summary>
-    /// Composite the final image at 1:1 physical-pixel resolution.
-    /// <paramref name="screenshot"/> is the full virtual-screen capture;
-    /// <paramref name="regionPx"/> is the selection in screenshot pixel coords;
-    /// <paramref name="strokes"/> are the pen/highlighter strokes in region-local coords;
-    /// <paramref name="blurLayer"/> is the blur-region host (positioned at region origin).
-    /// The blur layer goes on top so a region hides whatever was drawn under it.
+    /// Everything that sits *under* the magnifier layer: the blur layer flattened onto the
+    /// content beneath it. A magnifier set to include annotations samples this, so it
+    /// enlarges blurred pixels as blurred.
     /// </summary>
-    public static BitmapSource Compose(BitmapSource screenshot, Int32Rect regionPx,
+    public static BitmapSource ComposeBeneathMagnify(BitmapSource screenshot, Int32Rect regionPx,
         StrokeCollection strokes, Visual blurLayer, Visual shapeLayer, Visual stickerLayer, Visual textLayer)
     {
         int w = Math.Max(1, regionPx.Width);
@@ -67,6 +64,47 @@ public static class Compositor
         result.Render(dv);
         result.Freeze();
         return result;
+    }
+
+    /// <summary>
+    /// Composite the final image at 1:1 physical-pixel resolution.
+    /// <paramref name="screenshot"/> is the full virtual-screen capture;
+    /// <paramref name="regionPx"/> is the selection in screenshot pixel coords;
+    /// <paramref name="strokes"/> are the pen/highlighter strokes in region-local coords;
+    /// <paramref name="blurLayer"/> is the blur-region host (positioned at region origin).
+    /// The blur layer goes on top so a region hides whatever was drawn under it, and the
+    /// magnifier layer on top of that so an enlarged view is never itself obscured.
+    /// </summary>
+    public static BitmapSource Compose(BitmapSource screenshot, Int32Rect regionPx,
+        StrokeCollection strokes, Visual blurLayer, Visual magnifyLayer,
+        Visual shapeLayer, Visual stickerLayer, Visual textLayer)
+    {
+        int w = Math.Max(1, regionPx.Width);
+        int h = Math.Max(1, regionPx.Height);
+        var full = new Rect(0, 0, w, h);
+
+        var beneath = ComposeBeneathMagnify(
+            screenshot, regionPx, strokes, blurLayer, shapeLayer, stickerLayer, textLayer);
+
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            dc.DrawImage(beneath, full);
+            dc.DrawImage(RenderLayer(magnifyLayer, w, h), full);
+        }
+
+        var result = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+        result.Render(dv);
+        result.Freeze();
+        return result;
+    }
+
+    /// <summary>The bare screenshot crop for the selection, in region-local coords.</summary>
+    public static BitmapSource CropRegion(BitmapSource screenshot, Int32Rect regionPx)
+    {
+        var crop = new CroppedBitmap(screenshot, ClampRect(regionPx, screenshot));
+        crop.Freeze();
+        return crop;
     }
 
     /// <summary>The annotation hosts have offset (0,0), so they render 1:1 into the region.</summary>
