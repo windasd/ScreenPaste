@@ -1248,7 +1248,7 @@ public partial class CaptureOverlayWindow : Window
         // below so they can be dragged/resized. (Annotation grabbing is handled earlier
         // by the tunneling EditLayer handlers, for every tool.)
         InteractionLayer.IsHitTestVisible = isBlur || isText || isShape || isLine || isNone || isMagnify;
-        InteractionLayer.Cursor = isNone ? Cursors.SizeAll : Cursors.Arrow;
+        InteractionLayer.Cursor = DefaultInteractionCursor();
 
         if (isPen) LoadPenControls();
         if (isBlur) SelectBlurKind(_blurKind);
@@ -1258,6 +1258,11 @@ public partial class CaptureOverlayWindow : Window
         if (isMagnify) { SelectMagnifyShape(_magnifyShape); RefreshMagnifyToggles(); }
         RefreshSwatchSelection();
     }
+
+    /// <summary>With no tool, dragging the interaction layer moves the whole selection; every
+    /// other tool draws with it. Hover feedback overrides this while something is grabbable.</summary>
+    private Cursor DefaultInteractionCursor() =>
+        _tool == ToolKind.None ? Cursors.SizeAll : Cursors.Arrow;
 
     private void SelectBlurKind(BlurKind kind)
     {
@@ -1816,17 +1821,27 @@ public partial class CaptureOverlayWindow : Window
         EnsureMagnifySourceHandles();
         double x = _selection.X + spec.Source.X, y = _selection.Y + spec.Source.Y;
         double w = spec.Source.Width, h = spec.Source.Height;
-        double half = HandleSize / 2.0;
-        Point[] anchors =
+        double half = HandleSize / 2.0, edge = HandleSize;
+
+        // The handles ring the frame from OUTSIDE, touching its border rather than straddling
+        // it. Straddling looks tidier but eats the frame: a small framed area — the whole
+        // point of a magnifier — would be completely papered over by its own handles, leaving
+        // nothing to grab for moving it. Outside, the interior is always free.
+        Point[] corners =
         {
-            new(x, y),         new(x + w / 2, y),     new(x + w, y),
-            new(x, y + h / 2),                        new(x + w, y + h / 2),
-            new(x, y + h),     new(x + w / 2, y + h), new(x + w, y + h),
+            new(x - edge,        y - edge),          // NW
+            new(x + w / 2 - half, y - edge),         // N
+            new(x + w,           y - edge),          // NE
+            new(x - edge,        y + h / 2 - half),  // W
+            new(x + w,           y + h / 2 - half),  // E
+            new(x - edge,        y + h),             // SW
+            new(x + w / 2 - half, y + h),            // S
+            new(x + w,           y + h),             // SE
         };
         for (int i = 0; i < 8; i++)
         {
-            Canvas.SetLeft(_magnifySourceHandles[i], anchors[i].X - half);
-            Canvas.SetTop(_magnifySourceHandles[i], anchors[i].Y - half);
+            Canvas.SetLeft(_magnifySourceHandles[i], corners[i].X);
+            Canvas.SetTop(_magnifySourceHandles[i], corners[i].Y);
         }
         MagnifySourceHandleLayer.Visibility = Visibility.Visible;
     }
@@ -2082,9 +2097,15 @@ public partial class CaptureOverlayWindow : Window
 
         // Hover feedback (idle pointer only — never during a drawing drag).
         if (_editingText == null && e.LeftButton == MouseButtonState.Released)
-            EditLayer.Cursor = HitAnnotation(p) != null || HitMagnifySource(p) != null
-                ? Cursors.SizeAll
-                : null;
+        {
+            bool grabbable = HitAnnotation(p) != null || HitMagnifySource(p) != null;
+            EditLayer.Cursor = grabbable ? Cursors.SizeAll : null;
+            // Over a magnifier's framed source the element under the pointer is usually
+            // InteractionLayer, and an explicit Cursor on the hit element beats the one
+            // inherited from EditLayer -- so the hint has to be set there too or the frame
+            // looks immovable.
+            InteractionLayer.Cursor = grabbable ? Cursors.SizeAll : DefaultInteractionCursor();
+        }
     }
 
     private void EditLayer_PreviewMouseUp(object sender, MouseButtonEventArgs e)
