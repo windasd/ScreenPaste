@@ -125,10 +125,19 @@ public static class MagnifyEffects
     public static void ShiftSource(FrameworkElement host, double dx, double dy)
     {
         if (host is not Canvas c || c.Tag is not MagnifySpec s) return;
-        c.Tag = s with
-        {
-            Source = new Rect(s.Source.X + dx, s.Source.Y + dy, s.Source.Width, s.Source.Height),
-        };
+        SetSource(host, new Rect(s.Source.X + dx, s.Source.Y + dy, s.Source.Width, s.Source.Height));
+    }
+
+    /// <summary>
+    /// Re-point the annotation at a different area, in region-local coords. The enlarged view
+    /// stays put and keeps its size (only <paramref name="source"/>'s position is used), so
+    /// the caller has to re-sample afterwards for the new content to show up.
+    /// </summary>
+    public static void SetSource(FrameworkElement host, Rect source)
+    {
+        if (host is not Canvas c || c.Tag is not MagnifySpec s) return;
+        c.Tag = s with { Source = new Rect(source.X, source.Y, s.Source.Width, s.Source.Height) };
+        UpdateDecoration(host);
     }
 
     /// <summary>Change the zoom factor, growing/shrinking the enlarged view about its centre.

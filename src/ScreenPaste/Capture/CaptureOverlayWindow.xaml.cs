@@ -94,6 +94,10 @@ public partial class CaptureOverlayWindow : Window
     private bool _magnifyDragging;
     private Point _magnifyStart;
     private Rectangle? _magnifyPreview;
+    // Dragging a magnifier's framed source (re-points it at other content).
+    private FrameworkElement? _magnifySourceDrag;
+    private Point _magnifySourceGrab;
+    private Rect _magnifySourceStart;
 
     // Magnifier state (framing + region-adjust drags)
     private const int MagSrcW = 30, MagSrcH = 22, MagZoom = 6;   // 30×22 px shown at 180×132
@@ -1852,6 +1856,22 @@ public partial class CaptureOverlayWindow : Window
         if (_phase != Phase.Editing || _editingText != null) return;
         var p = e.GetPosition(EditLayer);
         var hit = HitAnnotation(p);
+
+        // A magnifier's framed source is grabbable too — dragging it re-points the enlarged
+        // view at different content. It is drawn in the top layer, so it wins over anything
+        // below the magnifier host, while the enlarged views themselves stay above it.
+        if ((hit == null || hit.Parent != MagnifyHost) && HitMagnifySource(p) is { } mag)
+        {
+            _selected = mag;
+            UpdateSelectionBox();
+            _magnifySourceDrag = mag;
+            _magnifySourceGrab = p;
+            _magnifySourceStart = MagnifyEffects.SpecOf(mag)!.Source;
+            EditLayer.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
         if (hit == null)
         {
             Deselect();   // empty space: clear the selection, then draw as usual
@@ -1874,6 +1894,17 @@ public partial class CaptureOverlayWindow : Window
         if (_phase != Phase.Editing) return;
         var p = e.GetPosition(EditLayer);
 
+        if (_magnifySourceDrag is { } mag)
+        {
+            MagnifyEffects.SetSource(mag, ClampSourceToRegion(new Rect(
+                _magnifySourceStart.X + (p.X - _magnifySourceGrab.X),
+                _magnifySourceStart.Y + (p.Y - _magnifySourceGrab.Y),
+                _magnifySourceStart.Width, _magnifySourceStart.Height)));
+            ResampleMagnifier(mag);   // it now frames different pixels
+            e.Handled = true;
+            return;
+        }
+
         if (_moveDragging && _selected != null)
         {
             var tt = EnsureTranslate(_selected);
@@ -1891,11 +1922,30 @@ public partial class CaptureOverlayWindow : Window
 
         // Hover feedback (idle pointer only — never during a drawing drag).
         if (_editingText == null && e.LeftButton == MouseButtonState.Released)
-            EditLayer.Cursor = HitAnnotation(p) != null ? Cursors.SizeAll : null;
+            EditLayer.Cursor = HitAnnotation(p) != null || HitMagnifySource(p) != null
+                ? Cursors.SizeAll
+                : null;
     }
 
     private void EditLayer_PreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_magnifySourceDrag is { } mag)
+        {
+            _magnifySourceDrag = null;
+            EditLayer.ReleaseMouseCapture();
+            e.Handled = true;
+
+            var before = _magnifySourceStart;
+            var now = MagnifyEffects.SpecOf(mag)!.Source;
+            if (Math.Abs(now.X - before.X) < 0.5 && Math.Abs(now.Y - before.Y) < 0.5) return;
+
+            // The history's Changed hook re-samples, so the commands only move the frame.
+            _history.Push(
+                undo: () => MagnifyEffects.SetSource(mag, before),
+                redo: () => MagnifyEffects.SetSource(mag, now));
+            return;
+        }
+
         if (!_moveDragging) return;
         _moveDragging = false;
         EditLayer.ReleaseMouseCapture();
@@ -1932,6 +1982,23 @@ public partial class CaptureOverlayWindow : Window
                     return el;
         return null;
     }
+
+    /// <summary>Topmost magnifier whose *framed source* contains <paramref name="p"/>
+    /// (region-local coords, the same space the source rect is stored in).</summary>
+    private FrameworkElement? HitMagnifySource(Point p)
+    {
+        for (int i = MagnifyHost.Children.Count - 1; i >= 0; i--)
+            if (MagnifyHost.Children[i] is FrameworkElement el &&
+                MagnifyEffects.SpecOf(el) is { } spec && spec.Source.Contains(p))
+                return el;
+        return null;
+    }
+
+    /// <summary>Keep a framed source inside the selection, preserving its size.</summary>
+    private Rect ClampSourceToRegion(Rect source) => new(
+        Math.Clamp(source.X, 0, Math.Max(0, _selection.Width - source.Width)),
+        Math.Clamp(source.Y, 0, Math.Max(0, _selection.Height - source.Height)),
+        source.Width, source.Height);
 
     /// <summary>Element bounds in host coordinates, including any move translation.</summary>
     private static Rect AnnotationBounds(FrameworkElement el)
