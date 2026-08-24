@@ -60,6 +60,12 @@
             <!-- Selection resize handles (editing phase): 4 corners + 4 edge midpoints. -->
             <Canvas x:Name="HandleLayer" Visibility="Collapsed"/>
 
+            <!-- Resize handles for the framed source of the selected magnifier. Lives out
+                 here rather than in EditLayer for two reasons: it is chrome and must never
+                 reach the export, and being a sibling of EditLayer means a click on a handle
+                 never tunnels through EditLayer's annotation-grab handlers. -->
+            <Canvas x:Name="MagnifySourceHandleLayer" Visibility="Collapsed"/>
+
             <!-- Pixel magnifier + colour readout: follows the cursor while framing the
                  region and while dragging the resize handles / moving the region. -->
             <StackPanel x:Name="Magnifier" Visibility="Collapsed" IsHitTestVisible="False">

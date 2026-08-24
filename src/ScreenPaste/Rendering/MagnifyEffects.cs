@@ -148,8 +148,67 @@ public static class MagnifyEffects
         zoom = Math.Clamp(zoom, MinZoom, MaxZoom);
         if (Math.Abs(zoom - s.Zoom) < 0.001) return false;
 
-        var before = ViewSize(s);
-        var spec = s with { Zoom = zoom };
+        Reframe(c, s with { Zoom = zoom });
+        return true;
+    }
+
+    /// <summary>
+    /// Re-frame the annotation: unlike <see cref="SetSource"/> this takes the new size too, so
+    /// the enlarged view resizes with it (view = source × zoom). Re-sample afterwards.
+    /// </summary>
+    public static void ResizeSource(FrameworkElement host, Rect source)
+    {
+        if (host is not Canvas c || c.Tag is not MagnifySpec s) return;
+        Reframe(c, s with { Source = source });
+    }
+
+    /// <summary>Where the enlarged view currently sits, translation included.</summary>
+    public static Point ViewPosition(FrameworkElement host) =>
+        host is Canvas c ? HostPosition(c) : new Point();
+
+    /// <summary>Put the framed source and the enlarged view back at exact values — undo/redo
+    /// of a re-frame, where re-deriving the position could drift once clamping is involved.</summary>
+    public static void SetFrame(FrameworkElement host, Rect source, Point viewPosition)
+    {
+        if (host is not Canvas c || c.Tag is not MagnifySpec s) return;
+        ApplySpec(c, s with { Source = source });
+        MoveViewTo(c, viewPosition);
+    }
+
+    /// <summary>
+    /// Nudge the enlarged view back inside <paramref name="bounds"/> when it still fits, so
+    /// growing the framed source (or zooming in) does not shove the view off the capture.
+    /// A view too big to fit is left alone — there is nowhere better to put it.
+    /// </summary>
+    public static void ClampViewInto(FrameworkElement host, Rect bounds)
+    {
+        if (host is not Canvas c || c.Tag is not MagnifySpec s) return;
+        var size = ViewSize(s);
+        if (size.Width > bounds.Width || size.Height > bounds.Height) return;
+
+        var at = HostPosition(c);
+        MoveViewTo(c, new Point(
+            Math.Clamp(at.X, bounds.X, bounds.Right - size.Width),
+            Math.Clamp(at.Y, bounds.Y, bounds.Bottom - size.Height)));
+    }
+
+    /// <summary>Move the view to an absolute position, leaving the user's drag translation
+    /// intact (it is folded into the Canvas offset instead).</summary>
+    private static void MoveViewTo(Canvas c, Point position)
+    {
+        double tx = 0, ty = 0;
+        if (c.RenderTransform is TranslateTransform tt) { tx = tt.X; ty = tt.Y; }
+        Canvas.SetLeft(c, position.X - tx);
+        Canvas.SetTop(c, position.Y - ty);
+        UpdateDecoration(c);
+    }
+
+    /// <summary>Apply a spec whose view size may differ, keeping the view centred where it is
+    /// so it does not walk away from the spot the user put it in. Reversible: re-applying the
+    /// old spec re-centres about the same point.</summary>
+    private static void Reframe(Canvas c, MagnifySpec spec)
+    {
+        var before = ViewSize((MagnifySpec)c.Tag!);
         var after = ViewSize(spec);
 
         double x = Canvas.GetLeft(c), y = Canvas.GetTop(c);
@@ -157,7 +216,6 @@ public static class MagnifyEffects
         Canvas.SetTop(c, (double.IsNaN(y) ? 0 : y) - (after.Height - before.Height) / 2);
 
         ApplySpec(c, spec);
-        return true;
     }
 
     public static Size ViewSize(MagnifySpec spec) => new(
